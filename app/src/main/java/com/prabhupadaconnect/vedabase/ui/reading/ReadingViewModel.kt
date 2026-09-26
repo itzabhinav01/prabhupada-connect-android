@@ -1,0 +1,230 @@
+package com.prabhupadaconnect.vedabase.ui.reading
+
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.prabhupadaconnect.vedabase.core.model.AppSettings
+import com.prabhupadaconnect.vedabase.core.model.CorpusRecord
+import com.prabhupadaconnect.vedabase.core.model.Highlight
+import com.prabhupadaconnect.vedabase.core.model.HighlightColor
+import com.prabhupadaconnect.vedabase.core.model.UserNote
+import com.prabhupadaconnect.vedabase.data.corpus.CorpusRepository
+import com.prabhupadaconnect.vedabase.data.settings.SettingsDataStore
+import com.prabhupadaconnect.vedabase.data.user.UserRepository
+import com.prabhupadaconnect.vedabase.highlight.HighlightRenderer
+import dagger.hilt.android.lifecycle.HiltViewModel
+import javax.inject.Inject
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+
+/** A field identifier for a highlight/note anchor - "Transliteration" | "Synonyms" | "Translation" | "Purport:{index}". */
+object HighlightField {
+    const val TRANSLITERATION = "Transliteration"
+    const val SYNONYMS = "Synonyms"
+    const val TRANSLATION = "Translation"
+    fun purport(index: Int) = "Purport:$index"
+}
+
+data class PendingSelection(
+    val field: String,
+    val startOffset: Int,
+    val length: Int,
+    val selectedText: String
+)
+
+sealed interface ReadingUiEvent {
+    data class OverlapRejected(val existing: Highlight) : ReadingUiEvent
+    data object HighlightCreated : ReadingUiEvent
+    data object NoteCreated : ReadingUiEvent
+}
+
+data class ReadingUiState(
+    val isLoading: Boolean = true,
+    val record: CorpusRecord? = null,
+    val breadcrumb: String = "",
+    val isBookmarked: Boolean = false,
+    val highlightsByField: Map<String, List<Highlight>> = emptyMap(),
+    val notes: List<UserNote> = emptyList(),
+    val hasPrevious: Boolean = false,
+    val hasNext: Boolean = false,
+    val settings: AppSettings = AppSettings(),
+    val pendingSelection: PendingSelection? = null
+)
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@HiltViewModel
+class ReadingViewModel @Inject constructor(
+    private val corpusRepository: CorpusRepository,
+    private val userRepository: UserRepository,
+    private val settingsDataStore: SettingsDataStore,
+    savedStateHandle: SavedStateHandle
+) : ViewModel() {
+
+    private val recordKey = MutableStateFlow(savedStateHandle.get<String>("recordKey") ?: "BG-1-1")
+    private val pendingSelection = MutableStateFlow<PendingSelection?>(null)
+    private val events = MutableStateFlow<ReadingUiEvent?>(null)
+    val uiEvents: StateFlow<ReadingUiEvent?> = events.asStateFlow()
+
+    private val recordState = MutableStateFlow<CorpusRecord?>(null)
+    private val breadcrumbState = MutableStateFlow("")
+    private val adjacencyState = MutableStateFlow(false to false)
+    private val isLoadingState = MutableStateFlow(true)
+
+    private val highlightsFlow = recordKey.flatMapLatest { key ->
+        userRepository.observeHighlightsForRecord(key)
+    }
+    private val notesFlow = recordKey.flatMapLatest { key ->
+        userRepository.observeNotesForRecord(key)
+    }
+    private val bookmarkFlow = recordKey.flatMapLatest { key ->
+        // Bookmarks table is small; re-derive membership on every active-list emission.
+        userRepository.observeActiveBookmarks()
+    }
+
+    // Split into two ≤5-arg groups and combine those - kotlinx.coroutines only
+    // provides typed `combine` overloads up to 5 flows; beyond that its
+    // vararg overload collapses every flow to a single shared element type,
+    // which is unnecessary risk here when two typed combines compose cleanly.
+    private data class RecordGroup(
+        val record: CorpusRecord?,
+        val breadcrumb: String,
+        val adjacency: Pair<Boolean, Boolean>,
+        val isLoading: Boolean,
+        val highlights: List<Highlight>
+    )
+
+    private data class ContextGroup(
+        val notes: List<UserNote>,
+        val bookmarks: List<com.prabhupadaconnect.vedabase.core.model.UserBookmark>,
+        val settings: AppSettings,
+        val pending: PendingSelection?
+    )
+
+    private val recordGroup = combine(
+        recordState, breadcrumbState, adjacencyState, isLoadingState, highlightsFlow
+    ) { record, breadcrumb, adjacency, isLoading, highlights ->
+        RecordGroup(record, breadcrumb, adjacency, isLoading, highlights)
+    }
+
+    private val contextGroup = combine(
+        notesFlow, bookmarkFlow, settingsDataStore.settings, pendingSelection
+    ) { notes, bookmarks, settings, pending ->
+        ContextGroup(notes, bookmarks, settings, pending)
+    }
+
+    val uiState: StateFlow<ReadingUiState> = combine(recordGroup, contextGroup) { r, c ->
+        ReadingUiState(
+            isLoading = r.isLoading,
+            record = r.record,
+            breadcrumb = r.breadcrumb,
+            isBookmarked = r.record != null && c.bookmarks.any { it.recordKey == r.record.recordKey },
+            highlightsByField = r.highlights.groupBy { it.field },
+            notes = c.notes,
+            hasPrevious = r.adjacency.first,
+            hasNext = r.adjacency.second,
+            settings = c.settings,
+            pendingSelection = c.pending
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReadingUiState())
+
+    init {
+        viewModelScope.launch { recordKey.collect { loadRecord(it) } }
+    }
+
+    private suspend fun loadRecord(key: String) {
+        isLoadingState.value = true
+        val record = corpusRepository.getRecord(key)
+        recordState.value = record
+        breadcrumbState.value = record?.let { corpusRepository.getCanonicalChapterHeader(it.bookKey, it.reference) } ?: ""
+        val prev = record?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = false) }
+        val next = record?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = true) }
+        adjacencyState.value = (prev != null) to (next != null)
+        isLoadingState.value = false
+        if (record != null) userRepository.recordOpened(record.recordKey)
+    }
+
+    fun open(newRecordKey: String) {
+        recordKey.value = newRecordKey
+    }
+
+    fun goToNext() = viewModelScope.launch {
+        val next = recordState.value?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = true) }
+        if (next != null) recordKey.value = next
+    }
+
+    fun goToPrevious() = viewModelScope.launch {
+        val prev = recordState.value?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = false) }
+        if (prev != null) recordKey.value = prev
+    }
+
+    fun toggleBookmark() = viewModelScope.launch {
+        val key = recordState.value?.recordKey ?: return@launch
+        if (userRepository.isBookmarked(key)) userRepository.removeBookmark(key) else userRepository.addBookmark(key)
+    }
+
+    fun toggleFocusMode() = viewModelScope.launch {
+        settingsDataStore.setFocusMode(!uiState.value.settings.focusModeEnabled)
+    }
+
+    fun onTextSelected(field: String, startOffset: Int, length: Int, selectedText: String) {
+        pendingSelection.value = PendingSelection(field, startOffset, length, selectedText)
+    }
+
+    fun clearPendingSelection() {
+        pendingSelection.value = null
+    }
+
+    /** Rejects an overlapping highlight exactly as the desktop app's ReadingViewModel does - never merges, never silently allows it. */
+    fun createHighlight(color: HighlightColor) = viewModelScope.launch {
+        val selection = pendingSelection.value ?: return@launch
+        val record = recordState.value ?: return@launch
+
+        val existing = userRepository.getActiveHighlightsForField(record.recordKey, selection.field)
+        val overlap = HighlightRenderer.findOverlap(existing, selection.startOffset, selection.length)
+        if (overlap != null) {
+            events.value = ReadingUiEvent.OverlapRejected(overlap)
+            return@launch
+        }
+
+        userRepository.addHighlight(
+            recordKey = record.recordKey,
+            field = selection.field,
+            startOffset = selection.startOffset,
+            length = selection.length,
+            selectedText = selection.selectedText,
+            color = color
+        )
+        pendingSelection.value = null
+        events.value = ReadingUiEvent.HighlightCreated
+    }
+
+    fun removeHighlight(highlightId: String) = viewModelScope.launch {
+        userRepository.removeHighlight(highlightId)
+    }
+
+    fun createNoteFromSelection(content: String, title: String? = null) = viewModelScope.launch {
+        val record = recordState.value ?: return@launch
+        val selection = pendingSelection.value
+        userRepository.createNote(
+            recordKey = record.recordKey,
+            content = content,
+            title = title,
+            field = selection?.field,
+            startOffset = selection?.startOffset ?: -1,
+            length = selection?.length ?: -1
+        )
+        pendingSelection.value = null
+        events.value = ReadingUiEvent.NoteCreated
+    }
+
+    fun consumeEvent() {
+        events.value = null
+    }
+}

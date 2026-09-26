@@ -1,0 +1,4 @@
+# The canonical corpus database is a large (~270MB) binary data artifact,
+# tracked via Git LFS so the repo clones quickly and GitHub's 100MB
+# per-blob limit never applies to it.
+*.db filter=lfs diff=lfs merge=lfs -text
