@@ -10,6 +10,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.android.Android
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.logging.LogLevel
 import io.ktor.client.plugins.logging.Logging
@@ -39,6 +40,14 @@ object AppModule {
     fun provideHttpClient(json: Json): HttpClient = HttpClient(Android) {
         install(ContentNegotiation) { json(json) }
         install(Logging) { level = LogLevel.INFO }
+        // Without this plugin the Android engine has no enforced upper bound on a
+        // stalled connection (dead server, captive portal) - a sync could hang the
+        // calling coroutine indefinitely instead of surfacing as a retryable error.
+        install(HttpTimeout) {
+            requestTimeoutMillis = 30_000
+            connectTimeoutMillis = 15_000
+            socketTimeoutMillis = 30_000
+        }
         expectSuccess = false
     }
 }
