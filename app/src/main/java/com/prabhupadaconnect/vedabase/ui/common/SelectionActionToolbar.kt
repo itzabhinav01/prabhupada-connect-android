@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.window.PopupProperties
 import com.prabhupadaconnect.vedabase.core.model.HighlightColor
 import com.prabhupadaconnect.vedabase.highlight.HighlightRenderer
 
@@ -68,7 +69,14 @@ class SelectionActionToolbar(
         val currentRect = rect ?: return
         if (statusState != TextToolbarStatus.Shown) return
 
-        Popup(popupPositionProvider = rectPositionProvider(currentRect)) {
+        // focusable = false is required so mounting this Popup doesn't
+        // steal focus from the selected BasicTextField - TextFieldSelectionManager
+        // treats that focus loss as "selection dismissed" and immediately
+        // calls hide() back, before the window ever gets a frame on screen.
+        Popup(
+            popupPositionProvider = rectPositionProvider(currentRect),
+            properties = PopupProperties(focusable = false, dismissOnClickOutside = false)
+        ) {
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = MaterialTheme.colorScheme.inverseSurface,
