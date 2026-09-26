@@ -341,14 +341,14 @@ class CorpusRepository @Inject constructor(
     // reports SQLITE_CORRUPT_VTAB (267) - and then deletes the corpus file -
     // the moment `snippet()` is evaluated against this corpus's external-
     // content FTS5 table (`content='Records', content_rowid='rowid'`),
-    // reproducibly, regardless of query shape (with or without a join to
-    // Records, with or without an extra RecordKey filter, using the real
-    // table name or its FROM-clause alias). `PRAGMA integrity_check` and an
-    // FTS5-capable byte-identical copy both confirm the file itself is
-    // fine - this is a genuine incompatibility between this SQLite build
-    // and `snippet()` on this table shape, not corruption. Search itself
-    // (matching, ranking, and opening the right verse) is unaffected;
-    // `preview` is simply left blank rather than risk it.
+    // reproducibly, regardless of query shape. `PRAGMA integrity_check` and
+    // an FTS5-capable byte-identical copy both confirm the file itself is
+    // fine - this is a genuine incompatibility between this SQLite build and
+    // `snippet()` on this table shape, not corruption. Search itself
+    // (matching, ranking, and opening the right verse) never depended on it,
+    // so `preview` is instead built by [SnippetGenerator] - a pure-Kotlin
+    // pass over just the returned rows' Translation/Purports text (never the
+    // full 50k+-record corpus), with no FTS5 involvement at all.
     // ------------------------------------------------------------------
 
     private fun getFtsColumnCount(database: SQLiteDatabase): Int {
@@ -461,7 +461,7 @@ class CorpusRepository @Inject constructor(
             sql.append("WHEN r.RecordKey LIKE '%' || ? || '%' THEN 3 ")
             args.add(cleanQuery)
             sql.append(
-                "ELSE 4 END) AS ExactCitationPriority " +
+                "ELSE 4 END) AS ExactCitationPriority, r.Translation, r.Purports " +
                     "FROM RecordsFts fts JOIN Records r ON r.rowid = fts.rowid " +
                     "LEFT JOIN Books b ON b.BookKey = r.BookKey " +
                     "WHERE RecordsFts MATCH ? AND ${excludeDuplicateContentSql("r")} "
@@ -530,6 +530,9 @@ class CorpusRepository @Inject constructor(
                     val refText = c.stringOrEmpty(2)
                     val seq = c.getInt(3)
                     val exactPriority = if (c.isNull(4)) 4 else c.getInt(4)
+                    val translation = c.stringOrEmpty(5)
+                    val purports = c.stringOrEmpty(6)
+                    val preview = SnippetGenerator.generate(listOf(translation, purports), query)
 
                     val title = BookRegistry.getBookTitle(bk)
                     var isExact = exactPriority <= 2
@@ -553,6 +556,7 @@ class CorpusRepository @Inject constructor(
                             bookKey = bk,
                             reference = refText.ifBlank { bk },
                             bookTitle = title,
+                            preview = preview,
                             category = "Scripture",
                             sequence = seq,
                             isExactMatch = isExact

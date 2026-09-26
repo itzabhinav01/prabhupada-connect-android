@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prabhupadaconnect.vedabase.core.registry.BookRegistry
+import com.prabhupadaconnect.vedabase.ui.common.snippetToAnnotatedString
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,7 +81,13 @@ fun SearchScreen(
                     items(state.scriptureResults, key = { it.recordKey }) { result ->
                         ListItem(
                             headlineContent = { Text(result.reference, fontWeight = if (result.isExactMatch) FontWeight.Bold else FontWeight.Normal) },
-                            supportingContent = { Text(result.preview.ifBlank { result.bookTitle }, maxLines = 2) },
+                            supportingContent = {
+                                if (result.preview.isNotBlank()) {
+                                    Text(snippetToAnnotatedString(result.preview), maxLines = 2)
+                                } else {
+                                    Text(result.bookTitle, maxLines = 2)
+                                }
+                            },
                             overlineContent = { Text(result.bookTitle) },
                             modifier = Modifier
                                 .fillMaxWidth()
