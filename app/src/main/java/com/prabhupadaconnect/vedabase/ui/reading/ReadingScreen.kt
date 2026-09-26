@@ -45,7 +45,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prabhupadaconnect.vedabase.core.model.CorpusRecord
-import com.prabhupadaconnect.vedabase.ui.common.SelectionActionToolbar
+import com.prabhupadaconnect.vedabase.ui.common.NoOpTextToolbar
+import com.prabhupadaconnect.vedabase.ui.common.SelectionActionBar
 import com.prabhupadaconnect.vedabase.ui.theme.bodyTextStyle
 import com.prabhupadaconnect.vedabase.ui.theme.devanagariTextStyle
 import com.prabhupadaconnect.vedabase.ui.theme.transliterationTextStyle
@@ -76,30 +77,6 @@ fun ReadingScreen(
         if (event != null) viewModel.consumeEvent()
     }
 
-    var lastSelection by remember { mutableStateOf<PendingSelection?>(null) }
-
-    val toolbar = remember {
-        SelectionActionToolbar(
-            onHighlight = { color ->
-                lastSelection?.let { viewModel.onTextSelected(it.field, it.startOffset, it.length, it.selectedText) }
-                viewModel.createHighlight(color)
-            },
-            onAddNote = {
-                lastSelection?.let {
-                    viewModel.onTextSelected(it.field, it.startOffset, it.length, it.selectedText)
-                    showNoteDialog = true
-                }
-            },
-            onCopy = {
-                lastSelection?.let { sel ->
-                    val ref = state.record?.reference ?: recordKey
-                    clipboard.setText(AnnotatedString("$ref\n\n${sel.selectedText}"))
-                }
-            },
-            onShare = { /* wired by the host Activity via an Intent.ACTION_SEND chooser */ }
-        )
-    }
-
     Scaffold(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         topBar = {
@@ -126,7 +103,11 @@ fun ReadingScreen(
             }
         }
     ) { padding ->
-        CompositionLocalProvider(LocalTextToolbar provides toolbar) {
+        // Suppresses the OS copy/paste bubble entirely - the highlight/note
+        // action menu is the plain SelectionActionBar below, driven by
+        // `state.pendingSelection` directly. See HighlightableBlock's doc
+        // comment for why a custom Popup-based TextToolbar was dropped.
+        CompositionLocalProvider(LocalTextToolbar provides NoOpTextToolbar) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -151,7 +132,7 @@ fun ReadingScreen(
                         highlightsByField = state.highlightsByField,
                         settings = state.settings,
                         onSelectionChanged = { field, start, end, text ->
-                            lastSelection = PendingSelection(field, start, end - start, text)
+                            viewModel.onTextSelected(field, start, end - start, text)
                         }
                     )
                 }
@@ -179,14 +160,27 @@ fun ReadingScreen(
                         Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit focus mode")
                     }
                 }
+
+                SelectionActionBar(
+                    visible = state.pendingSelection != null,
+                    onHighlight = { color -> viewModel.createHighlight(color) },
+                    onAddNote = { showNoteDialog = true },
+                    onCopy = {
+                        state.pendingSelection?.let { sel ->
+                            val ref = state.record?.reference ?: recordKey
+                            clipboard.setText(AnnotatedString("$ref\n\n${sel.selectedText}"))
+                        }
+                    },
+                    onShare = { /* wired by the host Activity via an Intent.ACTION_SEND chooser */ },
+                    onDismiss = { viewModel.clearPendingSelection() },
+                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                )
             }
         }
-
-        toolbar.Content()
     }
 
     if (showNoteDialog) {
-        var noteText by remember(lastSelection) { mutableStateOf(lastSelection?.selectedText.orEmpty()) }
+        var noteText by remember(state.pendingSelection) { mutableStateOf(state.pendingSelection?.selectedText.orEmpty()) }
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { showNoteDialog = false; viewModel.clearPendingSelection() },
             title = { Text("Add note") },
