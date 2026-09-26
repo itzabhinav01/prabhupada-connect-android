@@ -51,7 +51,7 @@ fun LibraryScreen(
                     expanded = book.bookKey in state.expandedBookKeys,
                     expandedChapters = state.expandedChapterTitles,
                     onToggleBook = { viewModel.toggleBook(book.bookKey) },
-                    onToggleChapter = { viewModel.toggleChapter("${book.bookKey}::$it") },
+                    onToggleChapter = { viewModel.toggleChapter(it) },
                     onOpenRecord = onOpenRecord
                 )
             }
@@ -81,7 +81,9 @@ private fun BookRow(
 
         if (expanded) {
             book.chapters.forEach { chapter ->
-                val chapterKey = chapter.title
+                // Composite key (bookKey + title) - chapter titles like "Verses"
+                // or "Chapter 1" are not unique across different books.
+                val chapterKey = "${book.bookKey}::${chapter.title}"
                 val chapterExpanded = chapterKey in expandedChapters
                 ListItem(
                     headlineContent = { Text(chapter.title, style = MaterialTheme.typography.bodyMedium) },

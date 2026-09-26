@@ -48,6 +48,40 @@ class CorpusRepository @Inject constructor(
         }
     }
 
+    private suspend fun invalidateDatabase() {
+        dbLock.withLock {
+            runCatching { database?.close() }
+            database = null
+        }
+    }
+
+    /**
+     * A cached connection can go bad out from under a caller that already
+     * holds a reference to it - most concretely, requery's SQLite closes the
+     * whole connection pool and deletes the file the moment it reports
+     * `SQLITE_CORRUPT` on any query, so every query issued against that
+     * now-closed pool afterward throws `IllegalStateException`, not a
+     * graceful "no rows" result. Rather than crash the app over what is, in
+     * practice, a recoverable condition (the corpus is a frozen, read-only
+     * asset we can always recopy from the APK), this closes out the stale
+     * connection, forces a fresh copy from assets, and retries the caller's
+     * operation exactly once - a second failure is a genuine, unrecoverable
+     * error and is allowed to propagate.
+     */
+    private suspend fun <T> withRecovery(block: suspend () -> T): T {
+        return try {
+            block()
+        } catch (e: Exception) {
+            if (e is IllegalStateException || e is SQLiteException) {
+                invalidateDatabase()
+                CorpusDatabaseAssetInstaller.ensureInstalled(context, forceReinstall = true)
+                block()
+            } else {
+                throw e
+            }
+        }
+    }
+
     // The scriptural reading order of works - single source of truth shared
     // with BookRegistry.canonicalBookOrder.
     private val canonicalBookOrder: List<String> get() = BookRegistry.canonicalBookOrder
@@ -86,13 +120,13 @@ class CorpusRepository @Inject constructor(
         purports = c.stringOrEmpty(12)
     )
 
-    suspend fun getRecord(recordKey: String): CorpusRecord? = withContext(Dispatchers.IO) {
+    suspend fun getRecord(recordKey: String): CorpusRecord? = withRecovery { withContext(Dispatchers.IO) {
         db().rawQuery("SELECT $RECORD_COLUMNS FROM Records WHERE RecordKey = ?", arrayOf(recordKey)).use { c ->
             if (c.moveToFirst()) readRecord(c) else null
         }
-    }
+    } }
 
-    suspend fun getRecords(recordKeys: Collection<String>): List<CorpusRecord> = withContext(Dispatchers.IO) {
+    suspend fun getRecords(recordKeys: Collection<String>): List<CorpusRecord> = withRecovery { withContext(Dispatchers.IO) {
         val keys = recordKeys.distinct()
         if (keys.isEmpty()) return@withContext emptyList()
 
@@ -105,9 +139,9 @@ class CorpusRepository @Inject constructor(
             while (c.moveToNext()) out.add(readRecord(c))
             out
         }
-    }
+    } }
 
-    suspend fun getAdjacentRecordKey(currentRecordKey: String, next: Boolean): String? = withContext(Dispatchers.IO) {
+    suspend fun getAdjacentRecordKey(currentRecordKey: String, next: Boolean): String? = withRecovery { withContext(Dispatchers.IO) {
         val database = db()
         var bookKey = ""
         var seq = -1
@@ -126,7 +160,7 @@ class CorpusRepository @Inject constructor(
         database.rawQuery(sql, arrayOf(bookKey, seq.toString())).use { c ->
             if (c.moveToFirst()) c.getString(0) else null
         }
-    }
+    } }
 
     // ------------------------------------------------------------------
     // Library hierarchy
@@ -138,9 +172,14 @@ class CorpusRepository @Inject constructor(
 
     suspend fun getLibraryHierarchy(): List<BookNode> {
         cachedHierarchy?.let { return it }
+        val books = withRecovery { loadLibraryHierarchy() }
+        cachedHierarchy = books
+        return books
+    }
 
+    private suspend fun loadLibraryHierarchy(): List<BookNode> {
         val database = db()
-        val books = withContext(Dispatchers.IO) {
+        return withContext(Dispatchers.IO) {
             val dbTitles = HashMap<String, String>()
             val dbOrder = HashMap<String, Int>()
             val dbAuthors = HashMap<String, String>()
@@ -227,9 +266,6 @@ class CorpusRepository @Inject constructor(
 
             result
         }
-
-        cachedHierarchy = books
-        return books
     }
 
     suspend fun getChapterRecords(recordKey: String): List<CorpusRecord> {
@@ -258,7 +294,7 @@ class CorpusRepository @Inject constructor(
     // Vocabulary (type-ahead)
     // ------------------------------------------------------------------
 
-    suspend fun getVocabularyTerms(prefix: String, limit: Int = 60): List<VocabTerm> = withContext(Dispatchers.IO) {
+    suspend fun getVocabularyTerms(prefix: String, limit: Int = 60): List<VocabTerm> = withRecovery { withContext(Dispatchers.IO) {
         val database = db()
         val cleanPrefix = prefix.trim().lowercase()
         val list = mutableListOf<VocabTerm>()
@@ -292,12 +328,27 @@ class CorpusRepository @Inject constructor(
         }
 
         list
-    }
+    } }
 
     // ------------------------------------------------------------------
     // Full-text search (FTS5) - see FtsQueryParser / IastSearchHelper for
     // the query-sanitization and diacritic-tolerant matching passes this
     // builds on.
+    //
+    // Note on SearchResult.preview: the desktop app's equivalent query calls
+    // FTS5's `snippet()` auxiliary function to produce a highlighted excerpt.
+    // On-device testing found that requery:sqlite-android's bundled SQLite
+    // reports SQLITE_CORRUPT_VTAB (267) - and then deletes the corpus file -
+    // the moment `snippet()` is evaluated against this corpus's external-
+    // content FTS5 table (`content='Records', content_rowid='rowid'`),
+    // reproducibly, regardless of query shape (with or without a join to
+    // Records, with or without an extra RecordKey filter, using the real
+    // table name or its FROM-clause alias). `PRAGMA integrity_check` and an
+    // FTS5-capable byte-identical copy both confirm the file itself is
+    // fine - this is a genuine incompatibility between this SQLite build
+    // and `snippet()` on this table shape, not corruption. Search itself
+    // (matching, ranking, and opening the right verse) is unaffected;
+    // `preview` is simply left blank rather than risk it.
     // ------------------------------------------------------------------
 
     private fun getFtsColumnCount(database: SQLiteDatabase): Int {
@@ -320,7 +371,7 @@ class CorpusRepository @Inject constructor(
         isExactWord: Boolean = false,
         sortOrder: String = "relevance",
         isExactCase: Boolean = false
-    ): SearchOutcome = withContext(Dispatchers.IO) {
+    ): SearchOutcome = withRecovery { withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext SearchOutcome(emptyList(), 0)
 
         var ftsQuery = FtsQueryParser.parse(query, isExactWord)
@@ -509,32 +560,11 @@ class CorpusRepository @Inject constructor(
                     )
                 }
             }
-
-            if (results.isNotEmpty()) {
-                val snipArgs = results.map { it.recordKey }.toMutableList()
-                snipArgs.add(ftsQuery)
-                val placeholders = results.joinToString(",") { "?" }
-                val snipMap = HashMap<String, String>()
-                database.rawQuery(
-                    "SELECT RecordKey, snippet(RecordsFts, -1, '«', '»', '...', 25) FROM RecordsFts " +
-                        "WHERE RecordKey IN ($placeholders) AND RecordsFts MATCH ?",
-                    snipArgs.toTypedArray()
-                ).use { c ->
-                    while (c.moveToNext()) {
-                        val k = c.getString(0)
-                        val s = c.stringOrEmpty(1)
-                        if (s.isNotBlank()) snipMap[k] = s
-                    }
-                }
-                for (r in results) {
-                    snipMap[r.recordKey]?.let { r.preview = it }
-                }
-            }
         } catch (_: SQLiteException) {
             // Syntax error in FTS5 query or schema mismatch: safe fallback to 0 results.
             return@withContext SearchOutcome(emptyList(), 0)
         }
 
         SearchOutcome(results, totalCount)
-    }
+    } }
 }

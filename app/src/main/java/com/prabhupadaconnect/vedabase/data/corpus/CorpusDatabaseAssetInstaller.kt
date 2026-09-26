@@ -21,20 +21,25 @@ import kotlinx.coroutines.withContext
 object CorpusDatabaseAssetInstaller {
 
     const val CORPUS_ASSET_NAME = "prabhupada_corpus.db"
-    private const val CORPUS_ASSET_VERSION = 1
+    private const val CORPUS_ASSET_VERSION = 2
     private const val VERSION_MARKER_NAME = "prabhupada_corpus.version"
 
     fun corpusDbFile(context: Context): File =
         File(context.getDatabasePath(CORPUS_ASSET_NAME).path)
 
-    suspend fun ensureInstalled(context: Context): File = withContext(Dispatchers.IO) {
+    suspend fun ensureInstalled(context: Context, forceReinstall: Boolean = false): File = withContext(Dispatchers.IO) {
         val dbFile = corpusDbFile(context)
         val versionFile = File(dbFile.parentFile, VERSION_MARKER_NAME)
         val installedVersion = versionFile.takeIf { it.exists() }?.readText()?.trim()?.toIntOrNull()
 
-        if (dbFile.exists() && installedVersion == CORPUS_ASSET_VERSION) {
+        if (!forceReinstall && dbFile.exists() && installedVersion == CORPUS_ASSET_VERSION) {
             return@withContext dbFile
         }
+
+        // A prior connection pool may have left WAL/rollback-journal sidecar
+        // files behind (e.g. after the app was killed mid-session) - clear
+        // them along with the main file so the fresh copy starts clean.
+        dbFile.parentFile?.listFiles { f -> f.name.startsWith(CORPUS_ASSET_NAME) }?.forEach { it.delete() }
 
         dbFile.parentFile?.mkdirs()
         val tmpFile = File(dbFile.parentFile, "$CORPUS_ASSET_NAME.tmp")
@@ -52,13 +57,20 @@ object CorpusDatabaseAssetInstaller {
         dbFile
     }
 
-    /** Opens the installed corpus read-only, with the same mmap/cache pragmas as the desktop app. */
+    /**
+     * Opens the installed corpus read-only, with the same page-cache pragma
+     * as the desktop app.
+     *
+     * Deliberately does NOT set `PRAGMA mmap_size` (the desktop app does, on
+     * .NET/Windows over NTFS): memory-mapped I/O on Android's emulated block
+     * storage has been observed to produce spurious `SQLITE_CORRUPT` reports
+     * on this exact file after the app is backgrounded and its mapped pages
+     * get reclaimed under memory pressure - since mmap'd I/O here is only a
+     * perf hint with no correctness requirement, it isn't worth that risk on
+     * this platform.
+     */
     fun openReadOnly(dbFile: File): SQLiteDatabase {
         val db = SQLiteDatabase.openDatabase(dbFile.path, null, SQLiteDatabase.OPEN_READONLY)
-        // Pure runtime perf tuning (never persisted, never touches the file
-        // itself) - safe to ignore if the platform's SQLite build rejects a
-        // pragma on a read-only connection.
-        runCatching { db.rawQuery("PRAGMA mmap_size = 268435456", null).use { it.moveToFirst() } }
         runCatching { db.rawQuery("PRAGMA cache_size = -64000", null).use { it.moveToFirst() } }
         return db
     }
