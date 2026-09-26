@@ -29,16 +29,36 @@ separate download step.
 
 ## Verified
 
-This project builds and packages end-to-end as-is:
+This project builds and packages end-to-end, and has been exercised at
+runtime on an Android emulator (API 34, `emulator-5554`) via ADB — not just
+compiled:
 
 ```
 ./gradlew :app:compileDebugKotlin   # Kotlin + Hilt + Room KSP codegen
 ./gradlew :app:assembleDebug        # full debug APK
+./gradlew testDebugUnitTest         # 57 JUnit tests, 100% passing
 ```
 
-Both succeeded during development (Gradle 9.3.1, AGP 8.12.0, JDK 17). There
-is no emulator/device in this environment, so the UI itself has not been
-exercised at runtime — only compiled and packaged.
+On-device, the following were driven end-to-end and confirmed working:
+
+- **Corpus install & search**: the bundled `prabhupada_corpus.db` extracts
+  from assets on first launch, and FTS5 `MATCH` queries ("krishna", "bhakti",
+  "duty") return results with correctly highlighted snippets.
+- **Reading mode**: verse records (Transliteration/Synonyms/Translation/
+  Purports) render correctly for both Bhagavad-gītā and Śrīmad-Bhāgavatam
+  records.
+- **Bookmarks**: creating a bookmark from Reading mode and seeing it appear
+  in the Bookmarks tab.
+- **Highlights**: selecting text in a purport/translation block, choosing a
+  color from the contextual bottom action bar, and confirming the highlight
+  span renders immediately (no screen reload) and survives an app restart —
+  including a direct-SQL insert test against `user.db`'s `highlights` table
+  (WAL-checkpointed, then read back through `HighlightRenderer`) to confirm
+  rendering is correct independent of the creation path.
+- **Notes**: creating both scripture-anchored and general notes, editing an
+  existing note, soft-deleting one, and filtering by type.
+
+Test environment: Gradle 9.3.1, AGP 8.12.0, JDK 17.
 
 ## Before you can run it
 
@@ -52,9 +72,29 @@ exercised at runtime — only compiled and packaged.
 3. **Gradle wrapper jar.** `gradle/wrapper/gradle-wrapper.jar` is included so
    `./gradlew` works standalone. If Android Studio ever asks to "regenerate"
    the wrapper, that's safe to accept.
-4. **Supabase project** (only needed for cloud sync): run the same
-   `supabase_schema.sql` the desktop app uses against your Supabase project,
-   then connect from Settings → Cloud Sync with your project URL and anon key.
+4. **Supabase project** (only needed for cloud sync):
+   1. Create a Supabase project, then run the same `supabase_schema.sql` the
+      desktop app uses against it (SQL Editor → paste → Run). This creates
+      `vb_bookmark_collections`, `vb_bookmarks`, `vb_highlights`, `vb_notes`,
+      and `vb_schema_info`, plus Row Level Security policies scoped to
+      `auth.uid()`.
+   2. In the app, go to Settings → Cloud Sync and enter your project URL
+      (`https://<ref>.supabase.co`) and anon/public API key (Project
+      Settings → API in the Supabase dashboard). Optionally add an email/
+      password if you want RLS-scoped per-user sync rather than the anon
+      role.
+   3. Tap "Test Connection" before syncing — it distinguishes a bad URL/key
+      (HTTP 401/403) from tables not yet created (HTTP 404, with a link back
+      to step 1) so a misconfiguration is diagnosable from the UI alone.
+   4. Every sync takes a local WAL-checkpointed snapshot of `user.db` into
+      `filesDir/backups/` *before* pulling or merging anything remote, so a
+      bad merge is always recoverable by restoring that file — see
+      `UserDataBackupService`. A 401 mid-sync triggers one re-authenticate-
+      and-retry; a 429 or 5xx triggers one fixed 2-second-delay retry;
+      anything else fails the sync without advancing the checkpoint (see
+      `ResearchSyncService.executeWithRecovery`). All Supabase HTTP calls are
+      bounded by a 30s request / 15s connect timeout (`AppModule`'s
+      `HttpTimeout` plugin) so a dead server can't hang a sync indefinitely.
 
 ## Why `requery:sqlite-android` is a dependency
 
@@ -67,18 +107,46 @@ sqlite-android` bundles its own native SQLite compiled with
 `CorpusRepository` only (the Room-managed `user.db` has no FTS5 dependency,
 so it still uses the platform's own SQLite via Room as normal).
 
+## Search snippets are generated in Kotlin, not by FTS5
+
+FTS5's own `snippet()` auxiliary function reproducibly trips
+`SQLITE_CORRUPT_VTAB` (error 267) against this corpus's external-content
+table under requery's bundled SQLite, regardless of query shape — so it's not
+used at all. Instead, `data/corpus/SnippetGenerator.kt` builds the preview
+text in pure Kotlin, over the small, already-fetched set of result rows
+(bounded by the search page size, never the full 50k+-record corpus):
+
+1. Tokenize the query into plain search terms, dropping FTS5 boolean
+   keywords (`AND`/`OR`/`NOT`/`NEAR`) and single-character tokens.
+2. Fold IAST diacritics to their plain-ASCII equivalent (`kṛṣṇa` → `krsna`)
+   on a 1:1 character basis — never removing or expanding a character — so a
+   folded index always lines up with the same offset in the original,
+   diacritic-bearing string.
+3. Search a prioritized field list (Translation before Purport, matching the
+   desktop app's own field priority) for the first token match, and return a
+   window of ~50 characters before / ~70 after it, with `...` ellipses where
+   the window was clipped and the match itself wrapped in `«...»` sentinels.
+4. `ui/common/SnippetText.kt` turns those sentinels into a bolded
+   `AnnotatedString` span for display in `SearchScreen`.
+
+Covered by 13 unit tests in `SnippetGeneratorTest.kt` (windowing/ellipsis
+placement, diacritic tolerance, field-priority fallback, blank/no-match
+handling).
+
 ## Architecture map
 
 | Layer | Where |
 |---|---|
-| Canonical corpus (read-only, FTS5) | `data/corpus/` — `CorpusRepository`, `FtsQueryParser`, `IastSearchHelper`, `ChapterTitleDeriver` |
-| User research data (Room, soft-delete) | `data/user/` — entities, DAOs, `UserRepository` (includes the LWW sync merge) |
+| Canonical corpus (read-only, FTS5) | `data/corpus/` — `CorpusRepository`, `FtsQueryParser`, `IastSearchHelper`, `ChapterTitleDeriver`, `SnippetGenerator` |
+| User research data (Room, soft-delete) | `data/user/` — entities, DAOs, `UserRepository`, `LwwMerge` (pure LWW decision logic) |
 | Highlight rendering & offset math | `highlight/HighlightRenderer.kt` |
-| Cloud sync (Ktor, PostgREST) | `data/sync/` — `SupabaseSyncProvider`, `ResearchSyncService`, `SyncWorker` |
+| Cloud sync (Ktor, PostgREST) | `data/sync/` — `SupabaseSyncProvider`, `ResearchSyncService`, `SyncWorker`, `UserDataBackupService` |
 | Settings (DataStore) & credentials (Keystore) | `data/settings/` |
 | Screens & ViewModels | `ui/reading`, `ui/library`, `ui/search`, `ui/bookmarks`, `ui/notes`, `ui/settings` |
+| Selection UX shared by Reading/Notes | `ui/common/` — `SelectionActionBar` (contextual bottom bar), `NoOpTextToolbar`, `SnippetText` |
 | Navigation | `ui/navigation/NavGraph.kt` |
 | DI | `data/di/AppModule.kt` (Hilt) |
+| Unit tests | `app/src/test/` — `FtsQueryParserTest`, `HighlightRendererTest`, `UserRepositoryLwwTest`, `SnippetGeneratorTest` (57 tests) |
 
 ## Known simplifications vs. the desktop app
 
@@ -98,6 +166,14 @@ partial coverage of everything — flagged here rather than silently dropped:
   highlight created on one client still land correctly when synced to and
   displayed on the other, even though each client's displayed text differs
   slightly (hard-wrap artifacts removed differently, or not at all).
+- **Text selection uses a custom bottom action bar, not the OS text
+  toolbar**: mounting a `Popup`-based `TextToolbar` over a selected
+  `BasicTextField` steals focus back from the field, which the field reads
+  as "selection lost" and hides the popup — an infinite show/hide loop.
+  `LocalTextToolbar` is overridden with a no-op (`NoOpTextToolbar`) and
+  selection state drives a plain `AnimatedVisibility` bottom bar
+  (`ui/common/SelectionActionBar.kt`) instead, which eliminates the focus
+  race entirely and is a more natural touch target than a floating popup.
 - **Bookmark collection reordering** is not drag-and-drop; collections sort
   by a plain `sortOrder` field with no reordering UI yet.
 - **Personal research search** (Notes tab in Search) is a plain substring
