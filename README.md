@@ -89,12 +89,18 @@ Test environment: Gradle 9.3.1, AGP 8.12.0, JDK 17.
    4. Every sync takes a local WAL-checkpointed snapshot of `user.db` into
       `filesDir/backups/` *before* pulling or merging anything remote, so a
       bad merge is always recoverable by restoring that file — see
-      `UserDataBackupService`. A 401 mid-sync triggers one re-authenticate-
-      and-retry; a 429 or 5xx triggers one fixed 2-second-delay retry;
-      anything else fails the sync without advancing the checkpoint (see
-      `ResearchSyncService.executeWithRecovery`). All Supabase HTTP calls are
-      bounded by a 30s request / 15s connect timeout (`AppModule`'s
-      `HttpTimeout` plugin) so a dead server can't hang a sync indefinitely.
+      `UserDataBackupService`. Only the newest 5 snapshots are kept (oldest
+      pruned automatically after each successful one, via `BackupRetention`)
+      so this doesn't grow unbounded over time. Pruning failures are
+      swallowed and never block the snapshot or the sync itself — deliberate,
+      since the whole point of this service is to make sync strictly safer,
+      never a new way for it to fail. A 401 mid-sync triggers one
+      re-authenticate-and-retry; a 429 or 5xx triggers one fixed
+      2-second-delay retry; anything else fails the sync without advancing
+      the checkpoint (see `ResearchSyncService.executeWithRecovery`). All
+      Supabase HTTP calls are bounded by a 30s request / 15s connect timeout
+      (`AppModule`'s `HttpTimeout` plugin) so a dead server can't hang a sync
+      indefinitely.
 
 ## Why `requery:sqlite-android` is a dependency
 
