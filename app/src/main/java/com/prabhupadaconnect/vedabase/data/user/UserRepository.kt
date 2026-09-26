@@ -317,13 +317,10 @@ class UserRepository @Inject constructor(
                     }
 
                     val existingUpdated = IsoTime.parse(existing.updatedUtc)
-                    val remoteWins = when {
-                        c.updatedUtc > existingUpdated -> true
-                        c.updatedUtc < existingUpdated -> { conflicts++; false }
-                        else -> c.id < localDeviceId
-                    }
+                    val decision = LwwMerge.resolve(c.updatedUtc, existingUpdated, c.id, localDeviceId)
+                    if (decision.isConflict) conflicts++
 
-                    if (remoteWins) {
+                    if (decision.remoteWins) {
                         collectionDao.upsert(
                             existing.copy(
                                 name = c.name, sortOrder = c.sortOrder,
@@ -341,13 +338,10 @@ class UserRepository @Inject constructor(
 
                     if (existing != null) {
                         val existingUpdated = IsoTime.parse(existing.updatedUtc)
-                        val remoteWins = when {
-                            b.updatedUtc > existingUpdated -> true
-                            b.updatedUtc < existingUpdated -> { conflicts++; false }
-                            else -> b.id < localDeviceId
-                        }
+                        val decision = LwwMerge.resolve(b.updatedUtc, existingUpdated, b.id, localDeviceId)
+                        if (decision.isConflict) conflicts++
 
-                        if (remoteWins) {
+                        if (decision.remoteWins) {
                             if (b.deletedUtc == null) {
                                 bookmarkDao.tombstoneOtherActive(b.recordKey, b.id, nowIso)
                             }
@@ -364,7 +358,7 @@ class UserRepository @Inject constructor(
                             val activeSibling = bookmarkDao.getActiveByRecordKey(b.recordKey)
                             when {
                                 activeSibling == null -> insertBookmark(b)
-                                b.updatedUtc >= IsoTime.parse(activeSibling.updatedUtc) -> {
+                                LwwMerge.incomingBookmarkWinsUniqueness(b.updatedUtc, IsoTime.parse(activeSibling.updatedUtc)) -> {
                                     bookmarkDao.tombstone(activeSibling.id, nowIso)
                                     insertBookmark(b)
                                 }
@@ -391,12 +385,9 @@ class UserRepository @Inject constructor(
                     }
 
                     val existingUpdated = IsoTime.parse(existing.updatedUtc)
-                    val remoteWins = when {
-                        h.updatedUtc > existingUpdated -> true
-                        h.updatedUtc < existingUpdated -> { conflicts++; false }
-                        else -> h.id < localDeviceId
-                    }
-                    if (remoteWins) highlightDao.upsert(h.toEntity())
+                    val decision = LwwMerge.resolve(h.updatedUtc, existingUpdated, h.id, localDeviceId)
+                    if (decision.isConflict) conflicts++
+                    if (decision.remoteWins) highlightDao.upsert(h.toEntity())
                 }
 
                 // 4. Notes: LWW
@@ -408,12 +399,9 @@ class UserRepository @Inject constructor(
                     }
 
                     val existingUpdated = IsoTime.parse(existing.updatedUtc)
-                    val remoteWins = when {
-                        n.updatedUtc > existingUpdated -> true
-                        n.updatedUtc < existingUpdated -> { conflicts++; false }
-                        else -> n.id < localDeviceId
-                    }
-                    if (remoteWins) noteDao.upsert(n.toEntity())
+                    val decision = LwwMerge.resolve(n.updatedUtc, existingUpdated, n.id, localDeviceId)
+                    if (decision.isConflict) conflicts++
+                    if (decision.remoteWins) noteDao.upsert(n.toEntity())
                 }
 
                 conflicts
