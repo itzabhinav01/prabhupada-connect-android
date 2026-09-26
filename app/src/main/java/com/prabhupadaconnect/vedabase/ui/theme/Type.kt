@@ -2,17 +2,22 @@ package com.prabhupadaconnect.vedabase.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.prabhupadaconnect.vedabase.R
 import com.prabhupadaconnect.vedabase.core.model.ReadingFontSize
 import com.prabhupadaconnect.vedabase.core.model.ReadingLineSpacing
 
-// Bundle Noto Sans Devanagari as res/font/noto_sans_devanagari.ttf (Google
-// Fonts, OFL-licensed) for correct Devanagari glyph shaping - falls back to
-// the platform's own Devanagari-capable system font in the meantime.
-val DevanagariFontFamily: FontFamily = FontFamily.Default
+// res/font/noto_sans_devanagari.ttf is Google's Noto Sans Devanagari
+// (OFL-licensed; see assets/licenses/NotoSansDevanagari-OFL.txt), a variable
+// font (wdth+wght axes). minSdk 26 renders variable-font TTFs natively, so no
+// static-instance fallback is needed - this gives correct conjunct/ligature
+// shaping for Devanagari-script Sanskrit citations that the platform's
+// default font does not reliably provide across OEM skins.
+val DevanagariFontFamily: FontFamily = FontFamily(Font(R.font.noto_sans_devanagari))
 
 val VedaBaseTypography = Typography()
 
