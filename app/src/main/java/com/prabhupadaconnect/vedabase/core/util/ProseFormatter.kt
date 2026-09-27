@@ -21,7 +21,8 @@ object ProseFormatter {
 
     private fun isSanskritDiacriticLetter(c: Char): Boolean = c in SANSKRIT_DIACRITICS
 
-    private val SANSKRIT_DIACRITICS = setOf(
+    /** Shared with [PurportBlockDetector]'s quoted-verse-paragraph density check. */
+    internal val SANSKRIT_DIACRITICS = setOf(
         'ā', 'Ā', 'ī', 'Ī', 'ū', 'Ū',
         'ṛ', 'Ṛ', 'ṝ', 'Ṝ',
         'ḷ', 'Ḷ', 'ḹ', 'Ḹ',
@@ -118,13 +119,25 @@ object ProseFormatter {
     }
 
     /** Splits purports into individual clean paragraphs for UI display. */
-    fun getCleanParagraphs(original: String?): List<String> {
+    fun getCleanParagraphs(original: String?): List<String> =
+        getParagraphs(original).map { it.cleaned }
+
+    /**
+     * One paragraph in both its cleaned (flowing-prose, for normal display)
+     * and raw (original line breaks intact) forms. [raw] is what a quoted-
+     * verse-block detector needs: [cleanProse] deliberately erases a
+     * paragraph's *internal* single line breaks (gluing/spacing words back
+     * together) so they carry no line-count signal once cleaned.
+     */
+    data class Paragraph(val raw: String, val cleaned: String)
+
+    fun getParagraphs(original: String?): List<Paragraph> {
         if (original.isNullOrBlank()) return emptyList()
 
         val rawParagraphs = original.split("\r\n\r\n", "\n\n", "\r\r").filter { it.isNotEmpty() }
         return rawParagraphs.mapNotNull { raw ->
             val cleaned = cleanProse(raw)
-            cleaned.ifBlank { null }
+            if (cleaned.isBlank()) null else Paragraph(raw.trim('\r', '\n'), cleaned)
         }
     }
 }

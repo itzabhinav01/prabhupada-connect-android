@@ -8,7 +8,9 @@ import com.prabhupadaconnect.vedabase.core.model.CorpusRecord
 import com.prabhupadaconnect.vedabase.core.model.Highlight
 import com.prabhupadaconnect.vedabase.core.model.HighlightColor
 import com.prabhupadaconnect.vedabase.core.model.UserNote
+import com.prabhupadaconnect.vedabase.core.util.CitationMatch
 import com.prabhupadaconnect.vedabase.data.corpus.CorpusRepository
+import com.prabhupadaconnect.vedabase.data.corpus.DirectReferenceService
 import com.prabhupadaconnect.vedabase.data.settings.SettingsDataStore
 import com.prabhupadaconnect.vedabase.data.user.UserRepository
 import com.prabhupadaconnect.vedabase.highlight.HighlightRenderer
@@ -64,6 +66,7 @@ class ReadingViewModel @Inject constructor(
     private val corpusRepository: CorpusRepository,
     private val userRepository: UserRepository,
     private val settingsDataStore: SettingsDataStore,
+    private val directReferenceService: DirectReferenceService,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
@@ -222,6 +225,27 @@ class ReadingViewModel @Inject constructor(
         )
         pendingSelection.value = null
         events.value = ReadingUiEvent.NoteCreated
+    }
+
+    fun updateNote(id: String, content: String, title: String?) = viewModelScope.launch {
+        userRepository.updateNote(id, content, title)
+    }
+
+    fun deleteNote(id: String) = viewModelScope.launch {
+        userRepository.deleteNote(id)
+    }
+
+    /**
+     * Resolves an in-purport citation ("Bg. 4.1", "Cc. Madhya 20.108") tapped
+     * by the reader to a navigable RecordKey via the same [DirectReferenceService]
+     * index the "@" quick-jump bar uses, and hands it to [onResolved] - a
+     * miss (a citation to a work/verse this corpus doesn't have) is silently
+     * ignored rather than navigating nowhere or showing an error for what is,
+     * from the reader's perspective, just inert unstyled text.
+     */
+    fun resolveCitation(citation: CitationMatch, onResolved: (String) -> Unit) = viewModelScope.launch {
+        val recordKey = directReferenceService.tryResolveExact("@${citation.bookKey} ${citation.numbers}")
+        if (recordKey != null) onResolved(recordKey)
     }
 
     fun consumeEvent() {

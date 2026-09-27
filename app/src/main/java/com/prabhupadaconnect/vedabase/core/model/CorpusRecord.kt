@@ -2,6 +2,7 @@ package com.prabhupadaconnect.vedabase.core.model
 
 import com.prabhupadaconnect.vedabase.core.util.DevanagariNormalizer
 import com.prabhupadaconnect.vedabase.core.util.ProseFormatter
+import com.prabhupadaconnect.vedabase.core.util.SongPayloadParser
 
 /**
  * One row of the frozen, read-only canonical corpus. Mirrors the desktop
@@ -37,8 +38,37 @@ data class CorpusRecord(
 
     /** UI-friendly split purports; FTS stores them as one string. */
     val purportParagraphs: List<String> by lazy { ProseFormatter.getCleanParagraphs(purports) }
+
+    /**
+     * Same paragraphs as [purportParagraphs], but each carries its original,
+     * uncleaned line breaks too - needed to detect an inline-quoted verse
+     * stanza (see [com.prabhupadaconnect.vedabase.core.util.PurportBlockDetector]),
+     * a signal [ProseFormatter.cleanProse] otherwise erases entirely.
+     */
+    val purportParagraphPairs: List<ProseFormatter.Paragraph> by lazy { ProseFormatter.getParagraphs(purports) }
+
+    /**
+     * Structured song/mantra payload, for the ~105 SVA/TMG records that
+     * embed one as JSON instead of plain prose (see [SongPayload]). Checked
+     * across every text field that could plausibly carry it, though in
+     * practice the corpus only ever puts it in `Purports`.
+     */
+    val songPayload: com.prabhupadaconnect.vedabase.core.model.SongPayload? by lazy {
+        SongPayloadParser.tryParse(rawDevanagari)
+            ?: SongPayloadParser.tryParse(translation)
+            ?: SongPayloadParser.tryParse(purports)
+    }
 }
 
+/**
+ * One work in the Library tree. Most books go straight to [chapters]; the
+ * two multi-tier scriptures (Śrīmad-Bhāgavatam's 12 Cantos, Caitanya-
+ * caritāmṛta's 3 līlās) instead populate [groups], one level up from their
+ * own chapters, so a ~335-chapter scripture doesn't dump every chapter into
+ * one flat scrolling list. [underlyingBookKeys] is every real corpus
+ * `BookKey` this node represents - for the merged Caitanya-caritāmṛta node
+ * that's {"DI","MADHYA","ANTYA"}; for everything else, just its own [bookKey].
+ */
 data class BookNode(
     val bookKey: String,
     val title: String,
@@ -46,7 +76,9 @@ data class BookNode(
     val category: String = "",
     val isPdf: Boolean = false,
     val pdfPath: String? = null,
-    val chapters: MutableList<ChapterNode> = mutableListOf()
+    val chapters: MutableList<ChapterNode> = mutableListOf(),
+    val groups: MutableList<BookGroupNode> = mutableListOf(),
+    val underlyingBookKeys: Set<String> = setOf(bookKey)
 ) {
     val isOtherAuthor: Boolean
         get() = author.isNotBlank() &&
@@ -55,7 +87,19 @@ data class BookNode(
 
     val isImported: Boolean
         get() = isPdf || bookKey.startsWith("PDF_", ignoreCase = true) || isOtherAuthor
+
+    val hasGroups: Boolean get() = groups.isNotEmpty()
+
+    val verseCount: Int
+        get() = if (hasGroups) groups.sumOf { g -> g.chapters.sumOf { it.records.size } }
+        else chapters.sumOf { it.records.size }
 }
+
+/** An intermediate grouping level between a [BookNode] and its [ChapterNode]s - a Canto or a līlā. */
+data class BookGroupNode(
+    val title: String,
+    val chapters: MutableList<ChapterNode> = mutableListOf()
+)
 
 data class ChapterNode(
     val title: String,

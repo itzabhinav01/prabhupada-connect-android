@@ -93,12 +93,21 @@ object HighlightRenderer {
     }
 
     /** Builds the styled [AnnotatedString] for [text] with every entry of [highlights] painted. */
-    fun render(text: String, highlights: List<Highlight>): AnnotatedString {
-        val ranges = resolveRanges(text, highlights)
-        if (ranges.isEmpty()) return AnnotatedString(text)
+    fun render(text: String, highlights: List<Highlight>): AnnotatedString = render(AnnotatedString(text), highlights)
+
+    /**
+     * Same as [render], but preserves any styling already present on [base]
+     * (e.g. [com.prabhupadaconnect.vedabase.core.util.SynonymsFormatter]'s
+     * lemma coloring) instead of starting from plain text - highlight
+     * background spans are layered on top of, never in place of, that
+     * existing styling.
+     */
+    fun render(base: AnnotatedString, highlights: List<Highlight>): AnnotatedString {
+        val ranges = resolveRanges(base.text, highlights)
+        if (ranges.isEmpty()) return base
 
         return buildAnnotatedString {
-            append(text)
+            append(base)
             for (r in ranges) {
                 addStyle(SpanStyle(background = r.color), r.start, r.end)
             }

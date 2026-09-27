@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -36,6 +37,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Card
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -45,6 +51,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prabhupadaconnect.vedabase.core.model.CorpusRecord
+import com.prabhupadaconnect.vedabase.core.model.UserNote
+import com.prabhupadaconnect.vedabase.core.util.CitationParser
+import com.prabhupadaconnect.vedabase.core.util.ProseFormatter
+import com.prabhupadaconnect.vedabase.core.util.PurportBlockDetector
+import com.prabhupadaconnect.vedabase.core.util.SynonymsFormatter
 import com.prabhupadaconnect.vedabase.ui.common.NoOpTextToolbar
 import com.prabhupadaconnect.vedabase.ui.common.SelectionActionBar
 import com.prabhupadaconnect.vedabase.ui.theme.bodyTextStyle
@@ -52,18 +63,22 @@ import com.prabhupadaconnect.vedabase.ui.theme.devanagariTextStyle
 import com.prabhupadaconnect.vedabase.ui.theme.transliterationTextStyle
 import com.prabhupadaconnect.vedabase.ui.theme.translationTextStyle
 
+/** A pending note-editor invocation - null means the dialog is closed. */
+private data class NoteDialogTarget(val existingId: String?, val initialContent: String)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ReadingScreen(
     recordKey: String,
     onNavigateBack: () -> Unit,
+    onNavigateToRecord: (String) -> Unit = {},
     viewModel: ReadingViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val event by viewModel.uiEvents.collectAsStateWithLifecycle()
     val clipboard = LocalClipboardManager.current
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
-    var showNoteDialog by remember { mutableStateOf(false) }
+    var noteDialogTarget by remember { mutableStateOf<NoteDialogTarget?>(null) }
 
     androidx.compose.runtime.LaunchedEffect(recordKey) { viewModel.open(recordKey) }
 
@@ -130,10 +145,15 @@ fun ReadingScreen(
                     else -> ReadingContent(
                         record = state.record!!,
                         highlightsByField = state.highlightsByField,
+                        notes = state.notes,
                         settings = state.settings,
                         onSelectionChanged = { field, start, end, text ->
                             viewModel.onTextSelected(field, start, end - start, text)
-                        }
+                        },
+                        onCitationTapped = { citation -> viewModel.resolveCitation(citation, onNavigateToRecord) },
+                        onAddNoteForVerse = { noteDialogTarget = NoteDialogTarget(existingId = null, initialContent = "") },
+                        onEditNote = { note -> noteDialogTarget = NoteDialogTarget(existingId = note.id, initialContent = note.content) },
+                        onDeleteNote = { note -> viewModel.deleteNote(note.id) }
                     )
                 }
 
@@ -164,7 +184,7 @@ fun ReadingScreen(
                 SelectionActionBar(
                     visible = state.pendingSelection != null,
                     onHighlight = { color -> viewModel.createHighlight(color) },
-                    onAddNote = { showNoteDialog = true },
+                    onAddNote = { noteDialogTarget = NoteDialogTarget(existingId = null, initialContent = state.pendingSelection?.selectedText.orEmpty()) },
                     onCopy = {
                         state.pendingSelection?.let { sel ->
                             val ref = state.record?.reference ?: recordKey
@@ -179,26 +199,34 @@ fun ReadingScreen(
         }
     }
 
-    if (showNoteDialog) {
-        var noteText by remember(state.pendingSelection) { mutableStateOf(state.pendingSelection?.selectedText.orEmpty()) }
+    noteDialogTarget?.let { target ->
+        var noteText by remember(target) { mutableStateOf(target.initialContent) }
         androidx.compose.material3.AlertDialog(
-            onDismissRequest = { showNoteDialog = false; viewModel.clearPendingSelection() },
-            title = { Text("Add note") },
+            onDismissRequest = { noteDialogTarget = null; viewModel.clearPendingSelection() },
+            title = { Text(if (target.existingId != null) "Edit note" else "Add note") },
             text = {
                 androidx.compose.material3.OutlinedTextField(
                     value = noteText,
                     onValueChange = { noteText = it },
+                    minLines = 3,
                     modifier = Modifier.fillMaxWidth()
                 )
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(onClick = {
-                    viewModel.createNoteFromSelection(noteText)
-                    showNoteDialog = false
-                }) { Text("Save") }
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        if (target.existingId != null) {
+                            viewModel.updateNote(target.existingId, noteText, null)
+                        } else {
+                            viewModel.createNoteFromSelection(noteText)
+                        }
+                        noteDialogTarget = null
+                    },
+                    enabled = noteText.isNotBlank()
+                ) { Text("Save") }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { showNoteDialog = false; viewModel.clearPendingSelection() }) { Text("Cancel") }
+                androidx.compose.material3.TextButton(onClick = { noteDialogTarget = null; viewModel.clearPendingSelection() }) { Text("Cancel") }
             }
         )
     }
@@ -208,14 +236,21 @@ fun ReadingScreen(
 private fun ReadingContent(
     record: CorpusRecord,
     highlightsByField: Map<String, List<com.prabhupadaconnect.vedabase.core.model.Highlight>>,
+    notes: List<UserNote>,
     settings: com.prabhupadaconnect.vedabase.core.model.AppSettings,
-    onSelectionChanged: (field: String, start: Int, end: Int, text: String) -> Unit
+    onSelectionChanged: (field: String, start: Int, end: Int, text: String) -> Unit,
+    onCitationTapped: (com.prabhupadaconnect.vedabase.core.util.CitationMatch) -> Unit,
+    onAddNoteForVerse: () -> Unit,
+    onEditNote: (UserNote) -> Unit,
+    onDeleteNote: (UserNote) -> Unit
 ) {
     val maxWidth = when (settings.readingWidth) {
         com.prabhupadaconnect.vedabase.core.model.ReadingWidthOption.Narrow -> 480.dp
         com.prabhupadaconnect.vedabase.core.model.ReadingWidthOption.Comfortable -> 640.dp
         com.prabhupadaconnect.vedabase.core.model.ReadingWidthOption.Wide -> 900.dp
     }
+
+    val songPayload = record.songPayload
 
     LazyColumn(
         modifier = Modifier
@@ -229,60 +264,155 @@ private fun ReadingContent(
                 Text(record.reference ?: record.recordKey, style = MaterialTheme.typography.titleLarge)
                 Spacer(Modifier.height(16.dp))
 
-                if (record.hasDevanagari) {
-                    Text(
-                        record.devanagari,
-                        style = devanagariTextStyle(settings.fontSize, settings.lineSpacing),
-                        color = com.prabhupadaconnect.vedabase.ui.theme.SanskritChantingColor
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-
-                if (settings.showTransliteration && record.hasTransliteration) {
-                    HighlightableBlock(
-                        text = record.transliteration,
-                        highlights = highlightsByField[HighlightField.TRANSLITERATION].orEmpty(),
-                        textStyle = transliterationTextStyle(settings.fontSize, settings.lineSpacing),
-                        onSelectionChanged = { s, e, t -> onSelectionChanged(HighlightField.TRANSLITERATION, s, e, t) }
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-
-                if (settings.showSynonyms && record.hasSynonyms) {
-                    HighlightableBlock(
-                        text = record.synonyms,
-                        highlights = highlightsByField[HighlightField.SYNONYMS].orEmpty(),
-                        textStyle = bodyTextStyle(settings.fontSize, settings.lineSpacing),
-                        onSelectionChanged = { s, e, t -> onSelectionChanged(HighlightField.SYNONYMS, s, e, t) }
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-
-                if (record.hasTranslation) {
-                    HighlightableBlock(
-                        text = record.cleanTranslation,
-                        highlights = highlightsByField[HighlightField.TRANSLATION].orEmpty(),
-                        textStyle = translationTextStyle(settings.fontSize, settings.lineSpacing),
-                        onSelectionChanged = { s, e, t -> onSelectionChanged(HighlightField.TRANSLATION, s, e, t) }
-                    )
-                    Spacer(Modifier.height(20.dp))
-                }
-
-                if (settings.showPurport && record.hasPurports) {
-                    HorizontalDivider()
-                    Spacer(Modifier.height(16.dp))
-                    record.purportParagraphs.forEachIndexed { index, paragraph ->
-                        val field = HighlightField.purport(index)
-                        HighlightableBlock(
-                            text = paragraph,
-                            highlights = highlightsByField[field].orEmpty(),
-                            textStyle = bodyTextStyle(settings.fontSize, settings.lineSpacing),
-                            onSelectionChanged = { s, e, t -> onSelectionChanged(field, s, e, t) }
+                if (songPayload != null) {
+                    // A structured song/mantra payload replaces the normal
+                    // verse/synonyms/translation/purport stack entirely -
+                    // its stanzas already carry their own transliteration,
+                    // synonyms and translation, and rendering both would
+                    // just duplicate the same content twice.
+                    SongView(songPayload, settings)
+                } else {
+                    if (record.hasDevanagari) {
+                        Text(
+                            record.devanagari,
+                            style = devanagariTextStyle(settings.fontSize, settings.lineSpacing),
+                            color = com.prabhupadaconnect.vedabase.ui.theme.SanskritChantingColor
                         )
                         Spacer(Modifier.height(16.dp))
+                    }
+
+                    if (settings.showTransliteration && record.hasTransliteration) {
+                        HighlightableBlock(
+                            text = record.transliteration,
+                            highlights = highlightsByField[HighlightField.TRANSLITERATION].orEmpty(),
+                            textStyle = transliterationTextStyle(settings.fontSize, settings.lineSpacing),
+                            onSelectionChanged = { s, e, t -> onSelectionChanged(HighlightField.TRANSLITERATION, s, e, t) }
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+
+                    if (settings.showSynonyms && record.hasSynonyms) {
+                        val lemmaColor = MaterialTheme.colorScheme.primary
+                        val delimiterColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        HighlightableBlock(
+                            text = record.synonyms,
+                            baseAnnotated = remember(record.synonyms) {
+                                SynonymsFormatter.format(record.synonyms, lemmaColor, delimiterColor)
+                            },
+                            highlights = highlightsByField[HighlightField.SYNONYMS].orEmpty(),
+                            textStyle = bodyTextStyle(settings.fontSize, settings.lineSpacing),
+                            onSelectionChanged = { s, e, t -> onSelectionChanged(HighlightField.SYNONYMS, s, e, t) }
+                        )
+                        Spacer(Modifier.height(16.dp))
+                    }
+
+                    if (record.hasTranslation) {
+                        HighlightableBlock(
+                            text = record.cleanTranslation,
+                            highlights = highlightsByField[HighlightField.TRANSLATION].orEmpty(),
+                            textStyle = translationTextStyle(settings.fontSize, settings.lineSpacing),
+                            onSelectionChanged = { s, e, t -> onSelectionChanged(HighlightField.TRANSLATION, s, e, t) }
+                        )
+                        Spacer(Modifier.height(20.dp))
+                    }
+
+                    if (settings.showPurport && record.hasPurports) {
+                        HorizontalDivider()
+                        Spacer(Modifier.height(16.dp))
+                        record.purportParagraphPairs.forEachIndexed { index, paragraph ->
+                            val field = HighlightField.purport(index)
+                            val citations = remember(paragraph.cleaned) { CitationParser.findCitations(paragraph.cleaned) }
+                            val isQuote = remember(paragraph.raw) { PurportBlockDetector.isQuotedVerseParagraph(paragraph.raw) }
+
+                            val block: @Composable () -> Unit = {
+                                HighlightableBlock(
+                                    text = paragraph.cleaned,
+                                    highlights = highlightsByField[field].orEmpty(),
+                                    textStyle = if (isQuote) {
+                                        transliterationTextStyle(settings.fontSize, settings.lineSpacing)
+                                    } else {
+                                        bodyTextStyle(settings.fontSize, settings.lineSpacing)
+                                    },
+                                    citations = citations,
+                                    onTap = { offset ->
+                                        citations.firstOrNull { offset in it.range }?.let(onCitationTapped)
+                                    },
+                                    onSelectionChanged = { s, e, t -> onSelectionChanged(field, s, e, t) }
+                                )
+                            }
+
+                            if (isQuote) {
+                                QuoteBlockCard { block() }
+                            } else {
+                                block()
+                            }
+                            Spacer(Modifier.height(16.dp))
+                        }
+                    }
+                }
+
+                PersonalNotesSection(
+                    notes = notes,
+                    onAddNote = onAddNoteForVerse,
+                    onEditNote = onEditNote,
+                    onDeleteNote = onDeleteNote
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PersonalNotesSection(
+    notes: List<UserNote>,
+    onAddNote: () -> Unit,
+    onEditNote: (UserNote) -> Unit,
+    onDeleteNote: (UserNote) -> Unit
+) {
+    Spacer(Modifier.height(8.dp))
+    HorizontalDivider()
+    Spacer(Modifier.height(16.dp))
+    Text("Personal Notes", style = MaterialTheme.typography.titleMedium)
+    Spacer(Modifier.height(8.dp))
+
+    if (notes.isEmpty()) {
+        Text(
+            "No notes on this verse yet.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.height(12.dp))
+    } else {
+        notes.forEach { note ->
+            Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = androidx.compose.ui.Alignment.Top
+                ) {
+                    Text(
+                        note.content,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Row {
+                        IconButton(onClick = { onEditNote(note) }) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit note")
+                        }
+                        IconButton(onClick = { onDeleteNote(note) }) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete note")
+                        }
                     }
                 }
             }
         }
+        Spacer(Modifier.height(8.dp))
     }
+
+    OutlinedButton(onClick = onAddNote) {
+        Icon(Icons.Filled.Add, contentDescription = null)
+        Spacer(Modifier.width(8.dp))
+        Text("Add note on this verse")
+    }
+    Spacer(Modifier.height(24.dp))
 }
