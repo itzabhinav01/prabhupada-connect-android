@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -42,6 +43,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Card
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -110,8 +113,47 @@ fun ReadingScreen(
                                 contentDescription = "Toggle bookmark"
                             )
                         }
-                        IconButton(onClick = { viewModel.toggleFocusMode() }) {
-                            Icon(Icons.Filled.Fullscreen, contentDescription = "Focus mode")
+                        var showMenu by remember { mutableStateOf(false) }
+                        IconButton(onClick = { showMenu = true }) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                        }
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(if (state.isBookmarked) "Bookmarked" else "Bookmark verse") },
+                                onClick = {
+                                    showMenu = false
+                                    viewModel.toggleBookmark()
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        if (state.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                        contentDescription = null
+                                    )
+                                }
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Add personal note") },
+                                onClick = {
+                                    showMenu = false
+                                    noteDialogTarget = NoteDialogTarget(existingId = null, initialContent = "")
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Edit, contentDescription = null)
+                                }
+                            )
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text("Toggle focus mode") },
+                                onClick = {
+                                    showMenu = false
+                                    viewModel.toggleFocusMode()
+                                },
+                                leadingIcon = {
+                                    Icon(Icons.Filled.Fullscreen, contentDescription = null)
+                                }
+                            )
                         }
                     }
                 )
@@ -158,18 +200,46 @@ fun ReadingScreen(
                 }
 
                 if (!state.settings.focusModeEnabled) {
-                    Row(
+                    androidx.compose.material3.Surface(
+                        tonalElevation = 4.dp,
+                        shadowElevation = 8.dp,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
                         modifier = Modifier
                             .fillMaxWidth()
                             .align(androidx.compose.ui.Alignment.BottomCenter)
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        IconButton(onClick = { viewModel.goToPrevious() }, enabled = state.hasPrevious) {
-                            Icon(Icons.Filled.ChevronLeft, contentDescription = "Previous verse")
-                        }
-                        IconButton(onClick = { viewModel.goToNext() }, enabled = state.hasNext) {
-                            Icon(Icons.Filled.ChevronRight, contentDescription = "Next verse")
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            OutlinedButton(
+                                onClick = { viewModel.goToPrevious() },
+                                enabled = state.hasPrevious,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                            ) {
+                                Text("‹ Prev", fontWeight = FontWeight.SemiBold)
+                            }
+
+                            Text(
+                                text = "swipe ‹ › or tap",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+
+                            androidx.compose.material3.Button(
+                                onClick = { viewModel.goToNext() },
+                                enabled = state.hasNext,
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                    containerColor = androidx.compose.ui.graphics.Color(0xFFE5A93C),
+                                    contentColor = androidx.compose.ui.graphics.Color.Black
+                                )
+                            ) {
+                                Text("Next ›", fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 } else {

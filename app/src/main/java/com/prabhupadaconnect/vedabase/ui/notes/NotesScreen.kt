@@ -48,7 +48,10 @@ private fun NotesFilter.label(): String = when (this) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NotesScreen(viewModel: NotesViewModel = hiltViewModel()) {
+fun NotesScreen(
+    showTopBar: Boolean = true,
+    viewModel: NotesViewModel = hiltViewModel()
+) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     // null = dialog closed; a NoteEditorTarget = dialog open, either for a
@@ -56,7 +59,11 @@ fun NotesScreen(viewModel: NotesViewModel = hiltViewModel()) {
     var editorTarget by remember { mutableStateOf<NoteEditorTarget?>(null) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("Notes") }) },
+        topBar = {
+            if (showTopBar) {
+                TopAppBar(title = { Text("Notes") })
+            }
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = {
                 editorTarget = NoteEditorTarget(existingId = null, title = "", content = viewModel.prefillSelectedText.orEmpty())

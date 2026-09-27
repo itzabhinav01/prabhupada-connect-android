@@ -47,6 +47,7 @@ import com.prabhupadaconnect.vedabase.core.model.BookmarkCollection
 fun BookmarksScreen(
     onOpenRecord: (String) -> Unit,
     onOpenHighlights: () -> Unit = {},
+    showTopBar: Boolean = true,
     viewModel: BookmarksViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -55,14 +56,16 @@ fun BookmarksScreen(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Bookmarks") },
-                actions = {
-                    IconButton(onClick = onOpenHighlights) {
-                        Icon(Icons.Filled.Highlight, contentDescription = "Highlights")
+            if (showTopBar) {
+                TopAppBar(
+                    title = { Text("Bookmarks") },
+                    actions = {
+                        IconButton(onClick = onOpenHighlights) {
+                            Icon(Icons.Filled.Highlight, contentDescription = "Highlights")
+                        }
                     }
-                }
-            )
+                )
+            }
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showNewCollectionDialog = true }) {

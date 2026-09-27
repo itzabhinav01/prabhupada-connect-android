@@ -638,6 +638,22 @@ class CorpusRepository @Inject constructor(
                     )
                 }
             }
+
+            // In "relevance" mode, apply the desktop's "Relevance selects, canonical order displays" algorithm:
+            // BM25 selects the relevant candidate pool; exact citations are pinned first;
+            // and the pool is then sorted by canonical book order followed by record sequence.
+            val finalResults = if (sortOrder.equals("relevance", true)) {
+                results
+                    .sortedWith(
+                        compareByDescending<SearchResult> { it.isExactMatch }
+                            .thenBy { BookRegistry.canonicalIndexOf(it.bookKey) }
+                            .thenBy { it.sequence }
+                    )
+            } else {
+                results
+            }
+
+            return@withContext SearchOutcome(finalResults, totalCount)
         } catch (_: SQLiteException) {
             // Syntax error in FTS5 query or schema mismatch: safe fallback to 0 results.
             return@withContext SearchOutcome(emptyList(), 0)

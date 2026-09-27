@@ -50,6 +50,9 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
+    fun getBook(bookKey: String): BookNode? =
+        _uiState.value.books.firstOrNull { it.bookKey.equals(bookKey, ignoreCase = true) }
+
     fun toggleBook(bookKey: String) {
         _uiState.value = _uiState.value.let { s ->
             val expanded = s.expandedBookKeys.toMutableSet()
