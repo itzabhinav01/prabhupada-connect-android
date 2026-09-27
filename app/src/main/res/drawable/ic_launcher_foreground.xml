@@ -4,11 +4,27 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Stylized open-book glyph representing scripture study. -->
+    <!-- Lotus petals cradling the scripture from below - subtle spiritual accent. -->
     <path
-        android:fillColor="#FFB8860B"
+        android:fillColor="#FFE0A845"
+        android:pathData="M54,84 C44,88 34,90 26,88 C34,82 46,80 54,84 Z" />
+    <path
+        android:fillColor="#FFE0A845"
+        android:pathData="M54,84 C64,88 74,90 82,88 C74,82 62,80 54,84 Z" />
+
+    <!-- Open scripture glyph. -->
+    <path
+        android:fillColor="#FFF2C230"
         android:pathData="M54,30 C46,24 34,22 24,24 V78 C34,76 46,78 54,84 C62,78 74,76 84,78 V24 C74,22 62,24 54,30 Z" />
     <path
-        android:fillColor="#FFFDF6E3"
+        android:strokeColor="#FFFFF8E7"
+        android:strokeWidth="2"
         android:pathData="M54,30 L54,84" />
+
+    <!-- Small rising-light accent above the spine, kept within the ~66dp
+         circular safe zone (roughly y 21-87) so masked launcher shapes
+         (a plain centered circle in particular) don't clip it away. -->
+    <path
+        android:fillColor="#FFFFDCA0"
+        android:pathData="M54,23 m-3.2,0 a3.2,3.2 0,1 1,6.4 0 a3.2,3.2 0,1 1,-6.4 0 Z" />
 </vector>
