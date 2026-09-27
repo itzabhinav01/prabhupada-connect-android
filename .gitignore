@@ -11,3 +11,10 @@ build/
 *.apk
 *.aab
 app/schemas/
+
+# Release signing material - never committed. CI builds debug only; a real
+# release build reads these from keystore/keystore.properties locally, or
+# from RELEASE_* environment variables (see app/build.gradle.kts).
+/keystore/*.jks
+/keystore/*.keystore
+/keystore/keystore.properties

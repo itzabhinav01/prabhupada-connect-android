@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -5,6 +7,32 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+}
+
+// Release signing material is never committed (see .gitignore). Locally, it
+// comes from keystore/keystore.properties (created once via `keytool`,
+// pointing at a sibling .jks in the same gitignored directory); in CI or on
+// a build server, from RELEASE_* environment variables instead. Neither
+// being present (e.g. a fresh CI checkout that only runs assembleDebug)
+// simply means no "release" signingConfig is registered below, so
+// assembleRelease still succeeds - it just produces an unsigned APK.
+val keystorePropertiesFile = rootProject.file("keystore/keystore.properties")
+var releaseStoreFile: File? = null
+var releaseStorePassword: String? = null
+var releaseKeyAlias: String? = null
+var releaseKeyPassword: String? = null
+
+if (keystorePropertiesFile.exists()) {
+    val props = Properties().apply { load(keystorePropertiesFile.inputStream()) }
+    releaseStoreFile = rootProject.file("keystore/${props.getProperty("storeFile")}")
+    releaseStorePassword = props.getProperty("storePassword")
+    releaseKeyAlias = props.getProperty("keyAlias")
+    releaseKeyPassword = props.getProperty("keyPassword")
+} else if (System.getenv("RELEASE_STORE_FILE") != null) {
+    releaseStoreFile = file(System.getenv("RELEASE_STORE_FILE")!!)
+    releaseStorePassword = System.getenv("RELEASE_STORE_PASSWORD")
+    releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
+    releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
 }
 
 android {
@@ -29,11 +57,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseStoreFile != null) {
+            create("release") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfigs.findByName("release")?.let { signingConfig = it }
         }
         debug {
             isMinifyEnabled = false
