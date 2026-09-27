@@ -155,6 +155,9 @@ class UserRepository @Inject constructor(
     fun observeHighlightsForRecord(recordKey: String): Flow<List<Highlight>> =
         highlightDao.observeForRecord(recordKey).map { list -> list.map { it.toDomain() } }
 
+    fun observeAllHighlights(): Flow<List<Highlight>> =
+        highlightDao.observeAll().map { list -> list.map { it.toDomain() } }
+
     suspend fun getActiveHighlightsForField(recordKey: String, field: String): List<Highlight> =
         withContext(Dispatchers.IO) { highlightDao.getActiveForField(recordKey, field).map { it.toDomain() } }
 
@@ -241,6 +244,10 @@ class UserRepository @Inject constructor(
                 openCount = (existing?.openCount ?: 0) + 1
             )
         )
+    }
+
+    suspend fun clearReadingHistory(): Unit = withContext(Dispatchers.IO) {
+        historyDao.clearAll()
     }
 
     // ------------------------------------------------------------------

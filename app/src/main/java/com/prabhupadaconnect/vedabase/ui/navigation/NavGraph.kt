@@ -24,6 +24,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.prabhupadaconnect.vedabase.ui.bookmarks.BookmarksScreen
+import com.prabhupadaconnect.vedabase.ui.highlights.HighlightsScreen
+import com.prabhupadaconnect.vedabase.ui.history.RecentlyReadScreen
 import com.prabhupadaconnect.vedabase.ui.library.LibraryScreen
 import com.prabhupadaconnect.vedabase.ui.notes.NotesScreen
 import com.prabhupadaconnect.vedabase.ui.reading.ReadingScreen
@@ -37,6 +39,8 @@ private object Routes {
     const val NOTES = "notes"
     const val SETTINGS = "settings"
     const val READING = "reading/{recordKey}"
+    const val HISTORY = "history"
+    const val HIGHLIGHTS = "highlights"
 
     fun reading(recordKey: String) = "reading/$recordKey"
 }
@@ -86,13 +90,31 @@ fun VedaBaseNavHost() {
             modifier = Modifier.padding(padding)
         ) {
             composable(Routes.LIBRARY) {
-                LibraryScreen(onOpenRecord = { navController.navigate(Routes.reading(it)) })
+                LibraryScreen(
+                    onOpenRecord = { navController.navigate(Routes.reading(it)) },
+                    onOpenHistory = { navController.navigate(Routes.HISTORY) }
+                )
             }
             composable(Routes.SEARCH) {
                 SearchScreen(onOpenRecord = { navController.navigate(Routes.reading(it)) })
             }
             composable(Routes.BOOKMARKS) {
-                BookmarksScreen(onOpenRecord = { navController.navigate(Routes.reading(it)) })
+                BookmarksScreen(
+                    onOpenRecord = { navController.navigate(Routes.reading(it)) },
+                    onOpenHighlights = { navController.navigate(Routes.HIGHLIGHTS) }
+                )
+            }
+            composable(Routes.HISTORY) {
+                RecentlyReadScreen(
+                    onOpenRecord = { navController.navigate(Routes.reading(it)) },
+                    onNavigateBack = { navController.popBackStack() }
+                )
+            }
+            composable(Routes.HIGHLIGHTS) {
+                HighlightsScreen(
+                    onOpenRecord = { navController.navigate(Routes.reading(it)) },
+                    onNavigateBack = { navController.popBackStack() }
+                )
             }
             composable(Routes.NOTES) {
                 NotesScreen()

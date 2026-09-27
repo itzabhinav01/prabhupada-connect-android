@@ -63,6 +63,9 @@ interface HighlightDao {
     @Query("SELECT * FROM highlights WHERE recordKey = :recordKey AND deletedUtc IS NULL")
     fun observeForRecord(recordKey: String): Flow<List<HighlightEntity>>
 
+    @Query("SELECT * FROM highlights WHERE deletedUtc IS NULL ORDER BY createdUtc DESC")
+    fun observeAll(): Flow<List<HighlightEntity>>
+
     @Query("SELECT * FROM highlights WHERE recordKey = :recordKey AND field = :field AND deletedUtc IS NULL")
     suspend fun getActiveForField(recordKey: String, field: String): List<HighlightEntity>
 
@@ -119,6 +122,9 @@ interface ReadingHistoryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(entity: ReadingHistoryEntity)
+
+    @Query("DELETE FROM reading_history")
+    suspend fun clearAll()
 }
 
 @Dao
