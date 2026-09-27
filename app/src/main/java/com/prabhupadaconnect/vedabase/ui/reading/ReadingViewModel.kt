@@ -47,6 +47,11 @@ sealed interface ReadingUiEvent {
     data object NoteCreated : ReadingUiEvent
 }
 
+data class ReadingTab(
+    val recordKey: String,
+    val title: String
+)
+
 data class ReadingUiState(
     val isLoading: Boolean = true,
     val record: CorpusRecord? = null,
@@ -57,7 +62,9 @@ data class ReadingUiState(
     val hasPrevious: Boolean = false,
     val hasNext: Boolean = false,
     val settings: AppSettings = AppSettings(),
-    val pendingSelection: PendingSelection? = null
+    val pendingSelection: PendingSelection? = null,
+    val tabs: List<ReadingTab> = emptyList(),
+    val activeTabIndex: Int = 0
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -70,10 +77,14 @@ class ReadingViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val recordKey = MutableStateFlow(savedStateHandle.get<String>("recordKey") ?: "BG-1-1")
+    private val initialKey = savedStateHandle.get<String>("recordKey") ?: "BG-1-1"
+    private val recordKey = MutableStateFlow(initialKey)
     private val pendingSelection = MutableStateFlow<PendingSelection?>(null)
     private val events = MutableStateFlow<ReadingUiEvent?>(null)
     val uiEvents: StateFlow<ReadingUiEvent?> = events.asStateFlow()
+
+    private val tabsState = MutableStateFlow<List<ReadingTab>>(listOf(ReadingTab(initialKey, initialKey)))
+    private val activeTabIndexState = MutableStateFlow(0)
 
     private val recordState = MutableStateFlow<CorpusRecord?>(null)
     private val breadcrumbState = MutableStateFlow("")
@@ -89,6 +100,10 @@ class ReadingViewModel @Inject constructor(
     private val bookmarkFlow = recordKey.flatMapLatest { key ->
         // Bookmarks table is small; re-derive membership on every active-list emission.
         userRepository.observeActiveBookmarks()
+    }
+
+    private val tabsFlow = combine(tabsState, activeTabIndexState) { tabs, activeIdx ->
+        tabs to activeIdx
     }
 
     // Split into two ≤5-arg groups and combine those - kotlinx.coroutines only
@@ -107,7 +122,8 @@ class ReadingViewModel @Inject constructor(
         val notes: List<UserNote>,
         val bookmarks: List<com.prabhupadaconnect.vedabase.core.model.UserBookmark>,
         val settings: AppSettings,
-        val pending: PendingSelection?
+        val pending: PendingSelection?,
+        val tabsInfo: Pair<List<ReadingTab>, Int>
     )
 
     private val recordGroup = combine(
@@ -117,9 +133,9 @@ class ReadingViewModel @Inject constructor(
     }
 
     private val contextGroup = combine(
-        notesFlow, bookmarkFlow, settingsDataStore.settings, pendingSelection
-    ) { notes, bookmarks, settings, pending ->
-        ContextGroup(notes, bookmarks, settings, pending)
+        notesFlow, bookmarkFlow, settingsDataStore.settings, pendingSelection, tabsFlow
+    ) { notes, bookmarks, settings, pending, tabsInfo ->
+        ContextGroup(notes, bookmarks, settings, pending, tabsInfo)
     }
 
     val uiState: StateFlow<ReadingUiState> = combine(recordGroup, contextGroup) { r, c ->
@@ -133,7 +149,9 @@ class ReadingViewModel @Inject constructor(
             hasPrevious = r.adjacency.first,
             hasNext = r.adjacency.second,
             settings = c.settings,
-            pendingSelection = c.pending
+            pendingSelection = c.pending,
+            tabs = c.tabsInfo.first,
+            activeTabIndex = c.tabsInfo.second
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ReadingUiState())
 
@@ -150,21 +168,102 @@ class ReadingViewModel @Inject constructor(
         val next = record?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = true) }
         adjacencyState.value = (prev != null) to (next != null)
         isLoadingState.value = false
-        if (record != null) userRepository.recordOpened(record.recordKey)
+        if (record != null) {
+            userRepository.recordOpened(record.recordKey)
+            val currentTabs = tabsState.value.toMutableList()
+            val activeIdx = activeTabIndexState.value
+            if (activeIdx in currentTabs.indices && currentTabs[activeIdx].recordKey == key) {
+                currentTabs[activeIdx] = currentTabs[activeIdx].copy(
+                    title = record.reference?.ifEmpty { record.recordKey } ?: record.recordKey
+                )
+                tabsState.value = currentTabs
+            }
+        }
+    }
+
+    fun selectTab(index: Int) {
+        val tabs = tabsState.value
+        if (index in tabs.indices) {
+            activeTabIndexState.value = index
+            recordKey.value = tabs[index].recordKey
+        }
+    }
+
+    fun closeTab(index: Int) {
+        val currentTabs = tabsState.value.toMutableList()
+        if (currentTabs.size <= 1) return
+        if (index in currentTabs.indices) {
+            val currentActive = activeTabIndexState.value
+            currentTabs.removeAt(index)
+            val newActive = when {
+                currentActive == index -> if (index >= currentTabs.size) currentTabs.size - 1 else index
+                currentActive > index -> currentActive - 1
+                else -> currentActive
+            }
+            tabsState.value = currentTabs
+            activeTabIndexState.value = newActive
+            recordKey.value = currentTabs[newActive].recordKey
+        }
+    }
+
+    fun openInNewTab(targetRecordKey: String) {
+        val currentTabs = tabsState.value.toMutableList()
+        val existingIndex = currentTabs.indexOfFirst { it.recordKey == targetRecordKey }
+        if (existingIndex != -1) {
+            selectTab(existingIndex)
+            return
+        }
+        if (currentTabs.size < 3) {
+            currentTabs.add(ReadingTab(targetRecordKey, targetRecordKey))
+            val newIndex = currentTabs.lastIndex
+            tabsState.value = currentTabs
+            activeTabIndexState.value = newIndex
+            recordKey.value = targetRecordKey
+        } else {
+            val replaceIndex = activeTabIndexState.value.coerceIn(0, currentTabs.size - 1)
+            currentTabs[replaceIndex] = ReadingTab(targetRecordKey, targetRecordKey)
+            tabsState.value = currentTabs
+            recordKey.value = targetRecordKey
+        }
     }
 
     fun open(newRecordKey: String) {
+        val activeIdx = activeTabIndexState.value
+        val currentTabs = tabsState.value.toMutableList()
+        if (currentTabs.isEmpty()) {
+            tabsState.value = listOf(ReadingTab(newRecordKey, newRecordKey))
+            activeTabIndexState.value = 0
+        } else if (activeIdx in currentTabs.indices) {
+            currentTabs[activeIdx] = ReadingTab(newRecordKey, newRecordKey)
+            tabsState.value = currentTabs
+        }
         recordKey.value = newRecordKey
     }
 
     fun goToNext() = viewModelScope.launch {
         val next = recordState.value?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = true) }
-        if (next != null) recordKey.value = next
+        if (next != null) {
+            val activeIdx = activeTabIndexState.value
+            val currentTabs = tabsState.value.toMutableList()
+            if (activeIdx in currentTabs.indices) {
+                currentTabs[activeIdx] = currentTabs[activeIdx].copy(recordKey = next, title = next)
+                tabsState.value = currentTabs
+            }
+            recordKey.value = next
+        }
     }
 
     fun goToPrevious() = viewModelScope.launch {
         val prev = recordState.value?.let { corpusRepository.getAdjacentRecordKey(it.recordKey, next = false) }
-        if (prev != null) recordKey.value = prev
+        if (prev != null) {
+            val activeIdx = activeTabIndexState.value
+            val currentTabs = tabsState.value.toMutableList()
+            if (activeIdx in currentTabs.indices) {
+                currentTabs[activeIdx] = currentTabs[activeIdx].copy(recordKey = prev, title = prev)
+                tabsState.value = currentTabs
+            }
+            recordKey.value = prev
+        }
     }
 
     fun toggleBookmark() = viewModelScope.launch {
@@ -243,9 +342,12 @@ class ReadingViewModel @Inject constructor(
      * ignored rather than navigating nowhere or showing an error for what is,
      * from the reader's perspective, just inert unstyled text.
      */
-    fun resolveCitation(citation: CitationMatch, onResolved: (String) -> Unit) = viewModelScope.launch {
-        val recordKey = directReferenceService.tryResolveExact("@${citation.bookKey} ${citation.numbers}")
-        if (recordKey != null) onResolved(recordKey)
+    fun resolveCitation(citation: CitationMatch, onResolved: ((String) -> Unit)? = null) = viewModelScope.launch {
+        val resolvedKey = directReferenceService.tryResolveExact("@${citation.bookKey} ${citation.numbers}")
+        if (resolvedKey != null) {
+            openInNewTab(resolvedKey)
+            onResolved?.invoke(resolvedKey)
+        }
     }
 
     fun consumeEvent() {

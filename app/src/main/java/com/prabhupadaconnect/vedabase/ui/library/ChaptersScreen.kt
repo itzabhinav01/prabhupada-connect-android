@@ -137,7 +137,7 @@ fun ChaptersScreen(
             ) {
                 itemsIndexed(activeChapters) { index, chapter ->
                     ChapterCard(
-                        indexNumber = index + 1,
+                        fallbackIndex = index + 1,
                         chapter = chapter,
                         onClick = { onSelectChapter(groupTitle, chapter) }
                     )
@@ -147,12 +147,58 @@ fun ChaptersScreen(
     }
 }
 
+private data class ChapterBadge(
+    val label: String,
+    val isChapterNumber: Boolean
+)
+
+private fun resolveChapterBadge(title: String, fallbackNumber: Int): ChapterBadge {
+    val lower = title.lowercase().trim()
+    val chMatch = Regex("""(?:Chapter|Ch\.|Adhyāya)\s+(\d+)""", RegexOption.IGNORE_CASE).find(title)
+    if (chMatch != null) {
+        return ChapterBadge(chMatch.groupValues[1], isChapterNumber = true)
+    }
+    val leadingNum = Regex("""^(\d+)[\s.:\-]""").find(title.trim())
+    if (leadingNum != null) {
+        return ChapterBadge(leadingNum.groupValues[1], isChapterNumber = true)
+    }
+    if (lower.contains("introduction") || lower.contains("intro")) {
+        return ChapterBadge("Intro", isChapterNumber = false)
+    }
+    if (lower.contains("preface")) {
+        return ChapterBadge("Pref", isChapterNumber = false)
+    }
+    if (lower.contains("dedication")) {
+        return ChapterBadge("Ded", isChapterNumber = false)
+    }
+    if (lower.contains("setting the scene")) {
+        return ChapterBadge("Scene", isChapterNumber = false)
+    }
+    if (lower.contains("foreword")) {
+        return ChapterBadge("Fore", isChapterNumber = false)
+    }
+    if (lower.contains("prologue")) {
+        return ChapterBadge("Pro", isChapterNumber = false)
+    }
+    if (lower.contains("epilogue")) {
+        return ChapterBadge("Epi", isChapterNumber = false)
+    }
+    if (lower.contains("appendix")) {
+        return ChapterBadge("App", isChapterNumber = false)
+    }
+    return ChapterBadge(fallbackNumber.toString(), isChapterNumber = true)
+}
+
 @Composable
 private fun ChapterCard(
-    indexNumber: Int,
+    fallbackIndex: Int,
     chapter: ChapterNode,
     onClick: () -> Unit
 ) {
+    val badge = remember(chapter.title, fallbackIndex) {
+        resolveChapterBadge(chapter.title, fallbackIndex)
+    }
+
     Card(
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
@@ -168,19 +214,22 @@ private fun ChapterCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Number box on the left
+            // Badge on the left: vibrant blue for real chapter numbers, slate for intro/preface
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .size(42.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF1976D2)),
+                    .background(
+                        if (badge.isChapterNumber) Color(0xFF1976D2)
+                        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = indexNumber.toString(),
-                    color = Color.White,
+                    text = badge.label,
+                    color = if (badge.isChapterNumber) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium
+                    style = if (badge.isChapterNumber) MaterialTheme.typography.titleMedium else MaterialTheme.typography.labelSmall
                 )
             }
 

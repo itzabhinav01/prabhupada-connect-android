@@ -35,14 +35,17 @@ data class SearchUiState(
     val sortOrder: String = "relevance",
     val scriptureResults: List<SearchResult> = emptyList(),
     val scriptureTotalCount: Int = 0,
-    val researchResults: List<UserSearchResult> = emptyList()
+    val researchResults: List<UserSearchResult> = emptyList(),
+    val directSuggestions: List<com.prabhupadaconnect.vedabase.data.corpus.ReferenceSuggestion> = emptyList(),
+    val exactJumpRecordKey: String? = null
 )
 
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class SearchViewModel @Inject constructor(
     private val corpusRepository: CorpusRepository,
-    private val userRepository: UserRepository
+    private val userRepository: UserRepository,
+    private val directReferenceService: com.prabhupadaconnect.vedabase.data.corpus.DirectReferenceService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SearchUiState())
@@ -84,7 +87,33 @@ class SearchViewModel @Inject constructor(
 
     fun onQueryChanged(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
-        pushTrigger()
+        val trimmed = query.trim()
+        if (com.prabhupadaconnect.vedabase.data.corpus.DirectReferenceService.isReferenceQuery(query)) {
+            viewModelScope.launch {
+                val suggestions = directReferenceService.getSuggestions(query)
+                val exact = directReferenceService.tryResolveExact(query)
+                _uiState.value = _uiState.value.copy(
+                    directSuggestions = suggestions,
+                    exactJumpRecordKey = exact
+                )
+            }
+        } else {
+            if (trimmed.isNotBlank() && (trimmed.contains(" ") || trimmed.contains("."))) {
+                viewModelScope.launch {
+                    val exact = directReferenceService.tryResolveExact("@$trimmed")
+                    _uiState.value = _uiState.value.copy(
+                        directSuggestions = emptyList(),
+                        exactJumpRecordKey = exact
+                    )
+                }
+            } else {
+                _uiState.value = _uiState.value.copy(
+                    directSuggestions = emptyList(),
+                    exactJumpRecordKey = null
+                )
+            }
+            pushTrigger()
+        }
     }
 
     fun onTabSelected(tab: SearchTab) {

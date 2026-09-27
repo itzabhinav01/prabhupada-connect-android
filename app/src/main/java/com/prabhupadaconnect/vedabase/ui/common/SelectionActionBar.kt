@@ -88,12 +88,17 @@ fun SelectionActionBar(
 
 @Composable
 private fun ColorDot(color: HighlightColor, onClick: () -> Unit) {
+    val desc = when (color) {
+        HighlightColor.Yellow -> "Highlight with Color 1 (Yellow)"
+        HighlightColor.Green -> "Highlight with Color 2 (Green)"
+        HighlightColor.Blue -> "Highlight with Color 3 (Blue)"
+    }
     IconButton(onClick = onClick) {
         androidx.compose.foundation.layout.Box(
             modifier = Modifier
-                .size(20.dp)
+                .size(22.dp)
                 .clip(CircleShape)
-                .background(HighlightRenderer.colorFor(color).copy(alpha = 1f))
+                .background(HighlightRenderer.swatchColorFor(color))
         )
     }
 }

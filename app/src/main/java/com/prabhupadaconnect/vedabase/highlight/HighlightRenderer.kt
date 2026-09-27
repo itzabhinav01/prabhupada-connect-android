@@ -35,9 +35,15 @@ import com.prabhupadaconnect.vedabase.core.model.HighlightColor
 object HighlightRenderer {
 
     fun colorFor(color: HighlightColor): Color = when (color) {
-        HighlightColor.Yellow -> Color(0x55FDD835)
-        HighlightColor.Green -> Color(0x554CAF50)
-        HighlightColor.Blue -> Color(0x5542A5F5)
+        HighlightColor.Yellow -> Color(0x66F0D870) // Color 1: Yellow/Saffron
+        HighlightColor.Green -> Color(0x66A8D6B0)  // Color 2: Green
+        HighlightColor.Blue -> Color(0x66A6C8E8)   // Color 3: Blue
+    }
+
+    fun swatchColorFor(color: HighlightColor): Color = when (color) {
+        HighlightColor.Yellow -> Color(0xFFF0D870) // Color 1
+        HighlightColor.Green -> Color(0xFFA8D6B0)  // Color 2
+        HighlightColor.Blue -> Color(0xFFA6C8E8)   // Color 3
     }
 
     private data class ResolvedRange(val start: Int, val end: Int, val color: Color)

@@ -102,8 +102,8 @@ class DirectReferenceServiceTest {
     }
 
     @Test
-    fun `the two Android-only prose works are registered`() {
-        assertEquals("BROKENNAMES", DirectReferenceService.parse("@BrokenNames 3").work?.bookKey)
-        assertEquals("JAPA", DirectReferenceService.parse("@Japa 5").work?.bookKey)
+    fun `the purged books JAPA and BROKENNAMES are not recognized`() {
+        assertNull(DirectReferenceService.parse("@BrokenNames 3").work)
+        assertNull(DirectReferenceService.parse("@Japa 5").work)
     }
 }

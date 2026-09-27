@@ -76,9 +76,22 @@ fun LibraryScreen(
 
     val filteredBooks = remember(state.books, selectedCategoryFilter) {
         when (selectedCategoryFilter) {
-            "Scriptures" -> state.books.filter { it.category.equals("Scripture", true) }
-            "Books" -> state.books.filter { it.category.equals("Books", true) }
-            "Essays" -> state.books.filter { it.category.contains("Essay", true) || it.category.contains("Conversation", true) }
+            "Scriptures" -> state.books.filter {
+                it.category.contains("Scripture", ignoreCase = true) ||
+                BookVisualRegistry.getVisual(it).categoryTag == "SCRIPTURE"
+            }
+            "Books" -> state.books.filter {
+                (it.category.contains("Book", ignoreCase = true) ||
+                 it.category.contains("Philosophy", ignoreCase = true)) &&
+                BookVisualRegistry.getVisual(it).categoryTag != "SCRIPTURE"
+            }
+            "Essays" -> state.books.filter {
+                it.category.contains("Essay", true) ||
+                it.category.contains("Conversation", true) ||
+                it.category.contains("Anthology", true) ||
+                it.category.contains("Dialogue", true) ||
+                it.category.contains("Articles", true)
+            }
             "Songs & Mantras" -> state.books.filter { it.bookKey in listOf("SVA", "TMG") }
             else -> state.books
         }
@@ -132,7 +145,7 @@ fun LibraryScreen(
                             )
                             Spacer(Modifier.width(12.dp))
                             Text(
-                                text = "Search — \"bg 1.1\", \"yoga\"...",
+                                text = "Search",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
                             )
@@ -277,8 +290,9 @@ private fun ModernBookCard(
                     shape = RoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 ) {
+                    val count = BookVisualRegistry.getCanonicalVerseCount(book.bookKey, book.verseCount)
                     Text(
-                        text = "${book.verseCount} verses",
+                        text = "$count verses",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)

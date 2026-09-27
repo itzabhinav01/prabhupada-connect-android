@@ -23,8 +23,9 @@ object PurportBlockDetector {
     private val LINE_BREAK = Regex("\r\n|\r|\n")
 
     fun isQuotedVerseParagraph(rawParagraph: String): Boolean {
-        val lineCount = rawParagraph.split(LINE_BREAK).size
-        if (lineCount < 2 || lineCount > 6) return false
+        val nonBlankLines = rawParagraph.split(LINE_BREAK).map { it.trim() }.filter { it.isNotEmpty() }
+        val lineCount = nonBlankLines.size
+        if (lineCount < 2 || lineCount > 8) return false
 
         var diacriticCount = 0
         var nonWhitespaceCount = 0
@@ -36,5 +37,16 @@ object PurportBlockDetector {
         if (nonWhitespaceCount == 0) return false
 
         return diacriticCount.toDouble() / nonWhitespaceCount >= VERSE_DIACRITIC_DENSITY_THRESHOLD
+    }
+
+    /**
+     * Formats a quoted stanza preserving authentic line breaks per line/pāda,
+     * matching vedabase.io presentation.
+     */
+    fun formatQuotedVerse(rawParagraph: String): String {
+        return rawParagraph.split(LINE_BREAK)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .joinToString("\n")
     }
 }

@@ -55,20 +55,56 @@ object BookVisualRegistry {
         "NOD" to BookCardVisual(
             initial = "N",
             badgeColor = Color(0xFFD84315), // Deep Orange
-            categoryTag = "BOOKS",
+            categoryTag = "SCRIPTURE",
             subtitle = "The Complete Science of Bhakti-yoga"
         ),
         "KB" to BookCardVisual(
             initial = "K",
             badgeColor = Color(0xFF0097A7), // Cyan/Teal
-            categoryTag = "BOOKS",
+            categoryTag = "SCRIPTURE",
             subtitle = "The Supreme Personality of Godhead"
         ),
         "TLC" to BookCardVisual(
             initial = "T",
             badgeColor = Color(0xFF5D4037), // Brown
-            categoryTag = "BOOKS",
+            categoryTag = "SCRIPTURE",
             subtitle = "The Precepts of Lord Caitanya Mahāprabhu"
+        ),
+        "TLK" to BookCardVisual(
+            initial = "T",
+            badgeColor = Color(0xFF00796B),
+            categoryTag = "SCRIPTURE",
+            subtitle = "Teachings of Lord Kapila"
+        ),
+        "TQK" to BookCardVisual(
+            initial = "T",
+            badgeColor = Color(0xFF7B1FA2),
+            categoryTag = "SCRIPTURE",
+            subtitle = "Teachings of Queen Kuntī"
+        ),
+        "BB" to BookCardVisual(
+            initial = "B",
+            badgeColor = Color(0xFF2E7D32),
+            categoryTag = "SCRIPTURE",
+            subtitle = "By Sanātana Gosvāmī with commentary"
+        ),
+        "MM" to BookCardVisual(
+            initial = "M",
+            badgeColor = Color(0xFF303F9F),
+            categoryTag = "SCRIPTURE",
+            subtitle = "Prayers of King Kulaśekhara"
+        ),
+        "NBS" to BookCardVisual(
+            initial = "N",
+            badgeColor = Color(0xFFE65100),
+            categoryTag = "SCRIPTURE",
+            subtitle = "Aphorisms on Divine Love"
+        ),
+        "GG" to BookCardVisual(
+            initial = "G",
+            badgeColor = Color(0xFF1976D2),
+            categoryTag = "SCRIPTURE",
+            subtitle = "Bengali Poetic Translation of Bhagavad-gītā"
         ),
         "SSR" to BookCardVisual(
             initial = "S",
@@ -111,13 +147,21 @@ object BookVisualRegistry {
         Color(0xFFC2185B)
     )
 
+    fun getCanonicalVerseCount(bookKey: String, actualCount: Int): Int {
+        return when (bookKey.uppercase()) {
+            "BG" -> 700 // Bhagavad-gītā canonical verse count (standard BBT edition groups combined verses e.g. 1.16-18)
+            else -> actualCount
+        }
+    }
+
     fun getVisual(book: BookNode): BookCardVisual {
         visualMap[book.bookKey.uppercase()]?.let { return it }
 
         // Fallback for other books
         val initial = book.title.firstOrNull { it.isLetter() }?.uppercase() ?: "B"
         val colorIndex = Math.abs(book.bookKey.hashCode()) % defaultPalette.size
-        val categoryTag = book.category.ifBlank { "BOOK" }.uppercase()
+        val isScripture = book.category.contains("Scripture", ignoreCase = true)
+        val categoryTag = if (isScripture) "SCRIPTURE" else book.category.ifBlank { "BOOK" }.uppercase()
         val subtitle = book.author.ifBlank { "His Divine Grace A.C. Bhaktivedanta Swami Prabhupāda" }
 
         return BookCardVisual(

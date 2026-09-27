@@ -88,9 +88,7 @@ class DirectReferenceService @Inject constructor(
             ReferenceWorkDefinition("LON", "The Laws of Nature: An Infallible Justice", setOf("LON", "LAWSOFNATURE"), 1, listOf("Chapter")),
             ReferenceWorkDefinition("MG", "Matchless Gift", setOf("MG", "MATCHLESSGIFT"), 1, listOf("Chapter")),
             ReferenceWorkDefinition("ROP", "Reservoir of Pleasure", setOf("ROP", "RESERVOIROFPLEASURE"), 1, listOf("Chapter")),
-            ReferenceWorkDefinition("GG", "Gītār Gāna", setOf("GG", "GITARGANA"), 1, listOf("Chapter")),
-            ReferenceWorkDefinition("BROKENNAMES", "Broken Names: A Story of Transformations", setOf("BROKENNAMES"), 1, listOf("Chapter")),
-            ReferenceWorkDefinition("JAPA", "Japa: Nine Keys from the Śikṣāṣṭaka", setOf("JAPA"), 1, listOf("Chapter"))
+            ReferenceWorkDefinition("GG", "Gītār Gāna", setOf("GG", "GITARGANA"), 1, listOf("Chapter"))
         )
 
         private val ALIAS_LOOKUP: Map<String, ReferenceWorkDefinition> = buildMap {

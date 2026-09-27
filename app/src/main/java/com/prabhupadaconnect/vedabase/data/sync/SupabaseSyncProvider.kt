@@ -199,7 +199,14 @@ class SupabaseSyncProvider(
             highlights = highlights.map {
                 Highlight(
                     id = it.id, recordKey = it.recordKey, field = it.field,
-                    color = runCatching { HighlightColor.valueOf(it.color) }.getOrDefault(HighlightColor.Yellow),
+                    color = runCatching {
+                        when (it.color.trim().lowercase()) {
+                            "yellow", "color1", "colour 1", "color 1", "1", "saffron" -> HighlightColor.Yellow
+                            "green", "color2", "colour 2", "color 2", "2" -> HighlightColor.Green
+                            "blue", "color3", "colour 3", "color 3", "3" -> HighlightColor.Blue
+                            else -> HighlightColor.valueOf(it.color.trim())
+                        }
+                    }.getOrDefault(HighlightColor.Yellow),
                     startOffset = it.startOffset, length = it.length, selectedText = it.selectedText,
                     createdUtc = IsoTime.parse(it.createdAt), updatedUtc = IsoTime.parse(it.updatedAt),
                     deletedUtc = it.deletedAt?.let(IsoTime::parse)

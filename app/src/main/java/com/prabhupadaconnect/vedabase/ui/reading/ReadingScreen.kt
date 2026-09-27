@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.MoreVert
@@ -99,64 +101,74 @@ fun ReadingScreen(
         snackbarHost = { androidx.compose.material3.SnackbarHost(snackbarHostState) },
         topBar = {
             if (!state.settings.focusModeEnabled) {
-                TopAppBar(
-                    title = { Text(state.breadcrumb, maxLines = 1) },
-                    navigationIcon = {
-                        IconButton(onClick = onNavigateBack) {
-                            Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                Column {
+                    TopAppBar(
+                        title = { Text(state.breadcrumb, maxLines = 1) },
+                        navigationIcon = {
+                            IconButton(onClick = onNavigateBack) {
+                                Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { viewModel.toggleBookmark() }) {
+                                Icon(
+                                    if (state.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                    contentDescription = "Toggle bookmark"
+                                )
+                            }
+                            var showMenu by remember { mutableStateOf(false) }
+                            IconButton(onClick = { showMenu = true }) {
+                                Icon(Icons.Filled.MoreVert, contentDescription = "Options")
+                            }
+                            androidx.compose.material3.DropdownMenu(
+                                expanded = showMenu,
+                                onDismissRequest = { showMenu = false }
+                            ) {
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(if (state.isBookmarked) "Bookmarked" else "Bookmark verse") },
+                                    onClick = {
+                                        showMenu = false
+                                        viewModel.toggleBookmark()
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            if (state.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                            contentDescription = null
+                                        )
+                                    }
+                                )
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Add personal note") },
+                                    onClick = {
+                                        showMenu = false
+                                        noteDialogTarget = NoteDialogTarget(existingId = null, initialContent = "")
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Edit, contentDescription = null)
+                                    }
+                                )
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text("Toggle focus mode") },
+                                    onClick = {
+                                        showMenu = false
+                                        viewModel.toggleFocusMode()
+                                    },
+                                    leadingIcon = {
+                                        Icon(Icons.Filled.Fullscreen, contentDescription = null)
+                                    }
+                                )
+                            }
                         }
-                    },
-                    actions = {
-                        IconButton(onClick = { viewModel.toggleBookmark() }) {
-                            Icon(
-                                if (state.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                                contentDescription = "Toggle bookmark"
-                            )
-                        }
-                        var showMenu by remember { mutableStateOf(false) }
-                        IconButton(onClick = { showMenu = true }) {
-                            Icon(Icons.Filled.MoreVert, contentDescription = "Options")
-                        }
-                        androidx.compose.material3.DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(if (state.isBookmarked) "Bookmarked" else "Bookmark verse") },
-                                onClick = {
-                                    showMenu = false
-                                    viewModel.toggleBookmark()
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        if (state.isBookmarked) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                                        contentDescription = null
-                                    )
-                                }
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("Add personal note") },
-                                onClick = {
-                                    showMenu = false
-                                    noteDialogTarget = NoteDialogTarget(existingId = null, initialContent = "")
-                                },
-                                leadingIcon = {
-                                    Icon(Icons.Filled.Edit, contentDescription = null)
-                                }
-                            )
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text("Toggle focus mode") },
-                                onClick = {
-                                    showMenu = false
-                                    viewModel.toggleFocusMode()
-                                },
-                                leadingIcon = {
-                                    Icon(Icons.Filled.Fullscreen, contentDescription = null)
-                                }
-                            )
-                        }
+                    )
+                    if (state.tabs.size > 1) {
+                        ReadingTabBar(
+                            tabs = state.tabs,
+                            activeTabIndex = state.activeTabIndex,
+                            onSelectTab = { viewModel.selectTab(it) },
+                            onCloseTab = { viewModel.closeTab(it) }
+                        )
                     }
-                )
+                }
             }
         }
     ) { padding ->
@@ -192,7 +204,7 @@ fun ReadingScreen(
                         onSelectionChanged = { field, start, end, text ->
                             viewModel.onTextSelected(field, start, end - start, text)
                         },
-                        onCitationTapped = { citation -> viewModel.resolveCitation(citation, onNavigateToRecord) },
+                        onCitationTapped = { citation -> viewModel.resolveCitation(citation) },
                         onAddNoteForVerse = { noteDialogTarget = NoteDialogTarget(existingId = null, initialContent = "") },
                         onEditNote = { note -> noteDialogTarget = NoteDialogTarget(existingId = note.id, initialContent = note.content) },
                         onDeleteNote = { note -> viewModel.deleteNote(note.id) }
@@ -271,19 +283,64 @@ fun ReadingScreen(
 
     noteDialogTarget?.let { target ->
         var noteText by remember(target) { mutableStateOf(target.initialContent) }
+        val verseRef = state.record?.reference ?: state.record?.recordKey ?: "Verse"
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { noteDialogTarget = null; viewModel.clearPendingSelection() },
-            title = { Text(if (target.existingId != null) "Edit note" else "Add note") },
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(20.dp),
+            title = {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    androidx.compose.material3.Surface(
+                        shape = androidx.compose.foundation.shape.CircleShape,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        modifier = Modifier.size(36.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Filled.Edit,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                    Column {
+                        Text(
+                            if (target.existingId != null) "Edit Note" else "Add Note",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            verseRef,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            },
             text = {
-                androidx.compose.material3.OutlinedTextField(
-                    value = noteText,
-                    onValueChange = { noteText = it },
-                    minLines = 3,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    androidx.compose.material3.OutlinedTextField(
+                        value = noteText,
+                        onValueChange = { noteText = it },
+                        placeholder = {
+                            Text(
+                                "Write your reflection or realization...",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        },
+                        minLines = 4,
+                        maxLines = 8,
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             },
             confirmButton = {
-                androidx.compose.material3.TextButton(
+                androidx.compose.material3.Button(
                     onClick = {
                         if (target.existingId != null) {
                             viewModel.updateNote(target.existingId, noteText, null)
@@ -292,11 +349,22 @@ fun ReadingScreen(
                         }
                         noteDialogTarget = null
                     },
-                    enabled = noteText.isNotBlank()
-                ) { Text("Save") }
+                    enabled = noteText.isNotBlank(),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = androidx.compose.ui.graphics.Color(0xFFE5A93C),
+                        contentColor = androidx.compose.ui.graphics.Color.Black
+                    )
+                ) {
+                    Text("Save Note", fontWeight = FontWeight.Bold)
+                }
             },
             dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { noteDialogTarget = null; viewModel.clearPendingSelection() }) { Text("Cancel") }
+                androidx.compose.material3.TextButton(
+                    onClick = { noteDialogTarget = null; viewModel.clearPendingSelection() }
+                ) {
+                    Text("Cancel")
+                }
             }
         )
     }
@@ -326,7 +394,7 @@ private fun ReadingContent(
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(vertical = 24.dp),
+        contentPadding = PaddingValues(top = 24.dp, bottom = 96.dp),
         horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally
     ) {
         item {
@@ -391,12 +459,15 @@ private fun ReadingContent(
                         Spacer(Modifier.height(16.dp))
                         record.purportParagraphPairs.forEachIndexed { index, paragraph ->
                             val field = HighlightField.purport(index)
-                            val citations = remember(paragraph.cleaned) { CitationParser.findCitations(paragraph.cleaned) }
                             val isQuote = remember(paragraph.raw) { PurportBlockDetector.isQuotedVerseParagraph(paragraph.raw) }
+                            val paragraphText = remember(paragraph.raw, paragraph.cleaned, isQuote) {
+                                if (isQuote) PurportBlockDetector.formatQuotedVerse(paragraph.raw) else paragraph.cleaned
+                            }
+                            val citations = remember(paragraphText) { CitationParser.findCitations(paragraphText) }
 
                             val block: @Composable () -> Unit = {
                                 HighlightableBlock(
-                                    text = paragraph.cleaned,
+                                    text = paragraphText,
                                     highlights = highlightsByField[field].orEmpty(),
                                     textStyle = if (isQuote) {
                                         transliterationTextStyle(settings.fontSize, settings.lineSpacing)
@@ -486,3 +557,61 @@ private fun PersonalNotesSection(
     }
     Spacer(Modifier.height(24.dp))
 }
+
+@Composable
+private fun ReadingTabBar(
+    tabs: List<ReadingTab>,
+    activeTabIndex: Int,
+    onSelectTab: (Int) -> Unit,
+    onCloseTab: (Int) -> Unit
+) {
+    androidx.compose.material3.Surface(
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 2.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        androidx.compose.foundation.lazy.LazyRow(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items(tabs.size) { index ->
+                val tab = tabs[index]
+                val selected = index == activeTabIndex
+                androidx.compose.material3.InputChip(
+                    selected = selected,
+                    onClick = { onSelectTab(index) },
+                    label = {
+                        Text(
+                            tab.title,
+                            maxLines = 1,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+                        )
+                    },
+                    trailingIcon = {
+                        IconButton(
+                            onClick = { onCloseTab(index) },
+                            modifier = Modifier.size(18.dp)
+                        ) {
+                            Icon(
+                                Icons.Filled.Close,
+                                contentDescription = "Close tab",
+                                modifier = Modifier.size(13.dp),
+                                tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    },
+                    colors = androidx.compose.material3.InputChipDefaults.inputChipColors(
+                        selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        selectedLabelColor = MaterialTheme.colorScheme.primary
+                    ),
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+                )
+            }
+        }
+    }
+}
+
