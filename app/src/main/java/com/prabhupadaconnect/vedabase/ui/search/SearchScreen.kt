@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.prabhupadaconnect.vedabase.core.registry.BookRegistry
+import com.prabhupadaconnect.vedabase.ui.common.QuickJumpBar
 import com.prabhupadaconnect.vedabase.ui.common.snippetToAnnotatedString
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,6 +44,8 @@ fun SearchScreen(
 
     Scaffold(topBar = { TopAppBar(title = { Text("Search") }) }) { padding ->
         Column(modifier = Modifier.padding(padding)) {
+            QuickJumpBar(onOpenRecord = onOpenRecord)
+
             OutlinedTextField(
                 value = state.query,
                 onValueChange = viewModel::onQueryChanged,

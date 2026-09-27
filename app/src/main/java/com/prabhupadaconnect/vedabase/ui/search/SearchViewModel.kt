@@ -48,73 +48,95 @@ class SearchViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
-    private val queryFlow = MutableStateFlow("")
+    /**
+     * Every parameter a search actually depends on, bundled into one value so
+     * [distinctUntilChanged] dedupes on the whole search, not just the typed
+     * text. `queryFlow` used to hold just the query string - toggling a book
+     * filter chip (or exact-word, exact-case, sort order, tab) re-published
+     * that *same* string, which `distinctUntilChanged` then swallowed as a
+     * no-op, so the filter was recorded in [SearchUiState] but a re-search
+     * with it never actually ran until the user also edited the query text.
+     */
+    private data class SearchTrigger(
+        val query: String,
+        val tab: SearchTab,
+        val bookFilters: Set<String>,
+        val isExactWord: Boolean,
+        val isExactCase: Boolean,
+        val sortOrder: String
+    )
+
+    private val triggerFlow = MutableStateFlow(SearchTrigger("", SearchTab.Scripture, emptySet(), false, false, "relevance"))
     private var searchJob: Job? = null
 
     init {
-        queryFlow
+        triggerFlow
             .debounce(250)
             .distinctUntilChanged()
             .onEach { runSearch(it) }
             .launchIn(viewModelScope)
     }
 
+    private fun pushTrigger() {
+        val s = _uiState.value
+        triggerFlow.value = SearchTrigger(s.query, s.selectedTab, s.selectedBookFilters, s.isExactWord, s.isExactCase, s.sortOrder)
+    }
+
     fun onQueryChanged(query: String) {
         _uiState.value = _uiState.value.copy(query = query)
-        queryFlow.value = query
+        pushTrigger()
     }
 
     fun onTabSelected(tab: SearchTab) {
         _uiState.value = _uiState.value.copy(selectedTab = tab)
-        queryFlow.value = _uiState.value.query
+        pushTrigger()
     }
 
     fun toggleBookFilter(bookKey: String) {
         val current = _uiState.value.selectedBookFilters.toMutableSet()
         if (!current.add(bookKey)) current.remove(bookKey)
         _uiState.value = _uiState.value.copy(selectedBookFilters = current)
-        queryFlow.value = _uiState.value.query
+        pushTrigger()
     }
 
     fun clearAllFilters() {
         _uiState.value = _uiState.value.copy(selectedBookFilters = emptySet())
-        queryFlow.value = _uiState.value.query
+        pushTrigger()
     }
 
     fun setExactWord(value: Boolean) {
         _uiState.value = _uiState.value.copy(isExactWord = value)
-        queryFlow.value = _uiState.value.query
+        pushTrigger()
     }
 
     fun setExactCase(value: Boolean) {
         _uiState.value = _uiState.value.copy(isExactCase = value)
-        queryFlow.value = _uiState.value.query
+        pushTrigger()
     }
 
     fun setSortOrder(order: String) {
         _uiState.value = _uiState.value.copy(sortOrder = order)
-        queryFlow.value = _uiState.value.query
+        pushTrigger()
     }
 
-    private fun runSearch(query: String) {
+    private fun runSearch(trigger: SearchTrigger) {
         searchJob?.cancel()
-        if (query.isBlank()) {
+        if (trigger.query.isBlank()) {
             _uiState.value = _uiState.value.copy(scriptureResults = emptyList(), scriptureTotalCount = 0, researchResults = emptyList(), isSearching = false)
             return
         }
 
         searchJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isSearching = true)
-            val state = _uiState.value
 
-            when (state.selectedTab) {
+            when (trigger.tab) {
                 SearchTab.Scripture -> {
                     val outcome = corpusRepository.search(
-                        query = query,
-                        bookKeys = state.selectedBookFilters.toList().ifEmpty { null },
-                        isExactWord = state.isExactWord,
-                        isExactCase = state.isExactCase,
-                        sortOrder = state.sortOrder
+                        query = trigger.query,
+                        bookKeys = trigger.bookFilters.toList().ifEmpty { null },
+                        isExactWord = trigger.isExactWord,
+                        isExactCase = trigger.isExactCase,
+                        sortOrder = trigger.sortOrder
                     )
                     _uiState.value = _uiState.value.copy(
                         scriptureResults = outcome.results,
@@ -129,7 +151,7 @@ class SearchViewModel @Inject constructor(
                     // canonical corpus that needs FTS5.
                     val notes = userRepository.observeAllNotes().first()
                     val results = notes
-                        .filter { it.content.contains(query, ignoreCase = true) || it.title?.contains(query, ignoreCase = true) == true }
+                        .filter { it.content.contains(trigger.query, ignoreCase = true) || it.title?.contains(trigger.query, ignoreCase = true) == true }
                         .map {
                             UserSearchResult(
                                 recordKey = it.recordKey,
