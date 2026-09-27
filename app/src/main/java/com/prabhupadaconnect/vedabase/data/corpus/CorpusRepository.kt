@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.Cursor
 import android.database.sqlite.SQLiteException
 import io.requery.android.database.sqlite.SQLiteDatabase
+import com.prabhupadaconnect.vedabase.core.model.BookGroupNode
 import com.prabhupadaconnect.vedabase.core.model.BookNode
 import com.prabhupadaconnect.vedabase.core.model.ChapterNode
 import com.prabhupadaconnect.vedabase.core.model.CorpusRecord
@@ -216,9 +217,32 @@ class CorpusRepository @Inject constructor(
                 a.compareTo(b)
             })
 
+            // Śrīmad-Bhāgavatam and Caitanya-caritāmṛta are multi-tier works -
+            // SB groups its ~335 chapters under 12 Cantos, and CC's three
+            // separate corpus BookKeys (DI/MADHYA/ANTYA) merge into one
+            // "Śrī Caitanya-caritāmṛta" header with 3 līlā groups - so neither
+            // dumps every chapter into one flat scrolling list under the book.
+            val ccLilaTitles = linkedMapOf("DI" to "Ādi-līlā", "MADHYA" to "Madhya-līlā", "ANTYA" to "Antya-līlā")
+
             val bookMap = LinkedHashMap<String, BookNode>()
             val result = mutableListOf<BookNode>()
+            var ccMergedNode: BookNode? = null
             for (key in bookKeys) {
+                if (key in ccLilaTitles) {
+                    val merged = ccMergedNode ?: BookNode(
+                        bookKey = "CC",
+                        title = "Śrī Caitanya-caritāmṛta",
+                        author = dbAuthors["DI"] ?: "His Divine Grace A.C. Bhaktivedanta Swami Prabhupāda",
+                        category = dbCategories["DI"] ?: "Scripture",
+                        underlyingBookKeys = ccLilaTitles.keys.toSet()
+                    ).also {
+                        ccMergedNode = it
+                        result.add(it)
+                    }
+                    bookMap[key] = merged
+                    continue
+                }
+
                 val node = BookNode(
                     bookKey = key,
                     title = dbTitles[key] ?: getBookTitle(key),
@@ -229,7 +253,15 @@ class CorpusRepository @Inject constructor(
                 bookMap[key] = node
             }
 
+            // Chapter maps are keyed by (BookKey, chapter title) for ordinary
+            // books, and additionally by an SB canto / CC līlā prefix so each
+            // grouping level gets its own independent LinkedHashMap - a
+            // "Chapter 1" in Canto 2 is a different ChapterNode than "Chapter
+            // 1" in Canto 3.
             val chapterMaps = HashMap<String, LinkedHashMap<String, ChapterNode>>()
+            val sbCantoGroups = LinkedHashMap<Int, BookGroupNode>()
+            val ccLilaGroups = LinkedHashMap<String, BookGroupNode>()
+
             database.rawQuery(
                 "SELECT BookKey, RecordKey, Reference, Title, Sequence FROM Records " +
                     "WHERE ${excludeDuplicateContentSql()} ORDER BY BookKey, Sequence",
@@ -248,9 +280,38 @@ class CorpusRepository @Inject constructor(
 
                     val chapterTitle = ChapterTitleDeriver.derive(bk, refText, recordTitle)
 
-                    val chapterMap = chapterMaps.getOrPut(bk) { LinkedHashMap() }
+                    val chapterMapKey: String
+                    val chapterList: MutableList<ChapterNode>
+                    when {
+                        bk == "SB" -> {
+                            val canto = sbCantoRegex.find(refText)?.groupValues?.get(1)?.toIntOrNull()
+                            if (canto != null) {
+                                val group = sbCantoGroups.getOrPut(canto) {
+                                    BookGroupNode("Canto $canto").also { bookNode.groups.add(it) }
+                                }
+                                chapterMapKey = "SB-canto-$canto"
+                                chapterList = group.chapters
+                            } else {
+                                chapterMapKey = "SB-unplaced"
+                                chapterList = bookNode.chapters
+                            }
+                        }
+                        bk in ccLilaTitles -> {
+                            val group = ccLilaGroups.getOrPut(bk) {
+                                BookGroupNode(ccLilaTitles.getValue(bk)).also { bookNode.groups.add(it) }
+                            }
+                            chapterMapKey = "CC-$bk"
+                            chapterList = group.chapters
+                        }
+                        else -> {
+                            chapterMapKey = bk
+                            chapterList = bookNode.chapters
+                        }
+                    }
+
+                    val chapterMap = chapterMaps.getOrPut(chapterMapKey) { LinkedHashMap() }
                     val chNode = chapterMap.getOrPut(chapterTitle) {
-                        ChapterNode(chapterTitle).also { bookNode.chapters.add(it) }
+                        ChapterNode(chapterTitle).also { chapterList.add(it) }
                     }
 
                     var displayRef = refText.ifBlank { rk }
@@ -264,17 +325,33 @@ class CorpusRepository @Inject constructor(
                 }
             }
 
+            // sbCantoGroups/ccLilaGroups were populated as encountered, which
+            // - thanks to `ORDER BY BookKey` sorting "ANTYA" < "DI" < "MADHYA"
+            // alphabetically - is NOT display order; sort SB's groups by
+            // canto number and CC's into the fixed Ādi/Madhya/Antya sequence.
+            sbCantoGroups.toSortedMap().values.let { sorted ->
+                bookMap["SB"]?.groups?.let { g -> g.clear(); g.addAll(sorted) }
+            }
+            ccMergedNode?.groups?.let { g ->
+                val byLila = g.associateBy { it.title }
+                g.clear()
+                ccLilaTitles.values.forEach { title -> byLila[title]?.let(g::add) }
+            }
+
             result
         }
     }
+
+    private val sbCantoRegex = Regex("^(?:SB\\s+)?(\\d+)\\.", RegexOption.IGNORE_CASE)
 
     suspend fun getChapterRecords(recordKey: String): List<CorpusRecord> {
         val target = getRecord(recordKey) ?: return emptyList()
         val chapterTitle = ChapterTitleDeriver.derive(target.bookKey, target.reference ?: "", null)
 
         val hierarchy = getLibraryHierarchy()
-        val book = hierarchy.firstOrNull { it.bookKey == target.bookKey } ?: return listOf(target)
-        val chapter = book.chapters.firstOrNull { it.title == chapterTitle } ?: return listOf(target)
+        val book = hierarchy.firstOrNull { target.bookKey in it.underlyingBookKeys } ?: return listOf(target)
+        val allChapters = if (book.hasGroups) book.groups.flatMap { it.chapters } else book.chapters
+        val chapter = allChapters.firstOrNull { it.title == chapterTitle } ?: return listOf(target)
 
         val recordKeys = chapter.records.map { it.recordKey }
         val records = getRecords(recordKeys)
@@ -390,10 +467,7 @@ class CorpusRepository @Inject constructor(
             ftsQuery = "$targetCol : ($ftsQuery)"
         }
 
-        val expandedMultiKeys = mutableListOf<String>()
-        bookKeys?.filter { it.isNotBlank() }?.distinct()?.forEach { bk ->
-            if (bk == "CC") expandedMultiKeys.addAll(listOf("DI", "MADHYA", "ANTYA")) else expandedMultiKeys.add(bk)
-        }
+        val expandedMultiKeys = SearchBookFilter.expand(bookKeys) ?: emptyList()
 
         val database = db()
         var totalCount = 0

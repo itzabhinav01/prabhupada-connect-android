@@ -92,7 +92,8 @@ fun VedaBaseNavHost() {
             composable(Routes.LIBRARY) {
                 LibraryScreen(
                     onOpenRecord = { navController.navigate(Routes.reading(it)) },
-                    onOpenHistory = { navController.navigate(Routes.HISTORY) }
+                    onOpenHistory = { navController.navigate(Routes.HISTORY) },
+                    onOpenHighlights = { navController.navigate(Routes.HIGHLIGHTS) }
                 )
             }
             composable(Routes.SEARCH) {
@@ -129,7 +130,8 @@ fun VedaBaseNavHost() {
                 val recordKey = entry.arguments?.getString("recordKey") ?: "BG-1-1"
                 ReadingScreen(
                     recordKey = recordKey,
-                    onNavigateBack = { navController.popBackStack() }
+                    onNavigateBack = { navController.popBackStack() },
+                    onNavigateToRecord = { navController.navigate(Routes.reading(it)) }
                 )
             }
         }

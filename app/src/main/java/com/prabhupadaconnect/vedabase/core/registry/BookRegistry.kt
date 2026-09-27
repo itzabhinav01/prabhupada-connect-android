@@ -67,7 +67,21 @@ object BookRegistry {
         BookDescriptor("BTG", "Back to Godhead (1944–1960)", abbreviation = "BTG", category = "Essays & Articles", canonicalOrder = 47),
         BookDescriptor("SVA", "Songs of the Vaiṣṇava Ācāryas", author = "$PRABHUPADA_AUTHOR / Vaiṣṇava Ācāryas", abbreviation = "SVA", category = "Books", canonicalOrder = 48),
         BookDescriptor("TMG", "Temple Mantra Guide", abbreviation = "TMG", category = "Books", canonicalOrder = 49),
-        BookDescriptor("UNKNOWN", "Life Comes From Life", abbreviation = "LCFL", category = "Conversations", canonicalOrder = 28)
+        // Two legitimate books that shipped in the corpus (see its own Books
+        // table) but were never registered here, so they fell back to their
+        // raw BookKey as a display title ("BROKENNAMES", "JAPA") and were
+        // invisible to the Search screen's book-filter chips, which only
+        // ever lists BookRegistry entries.
+        BookDescriptor(
+            "BROKENNAMES", "Broken Names: A Story of Transformations",
+            author = "His Holiness Sacinandana Swami", abbreviation = "Broken Names",
+            category = "Other Works", canonicalOrder = 50
+        ),
+        BookDescriptor(
+            "JAPA", "Japa: Nine Keys from the Śikṣāṣṭaka",
+            author = "His Grace Bhūrijana Dāsa", abbreviation = "Japa",
+            category = "Other Works", canonicalOrder = 51
+        )
     )
 
     private val byKey: Map<String, BookDescriptor> = canonicalBooks.associateBy { it.bookKey.uppercase() }
