@@ -7,10 +7,10 @@ package com.prabhupadaconnect.vedabase.data.corpus
  * (C#) - same book-specific parsing branches and fallbacks.
  *
  * Canonical chapter titles (matching vedabase.io's published chapter naming)
- * are ported for Bhagavad-gītā's 18 chapters; Śrīmad-Bhāgavatam and
- * Caitanya-caritāmṛta fall back to a bare "Canto C Chapter N" / "Chapter N"
- * (exactly what the desktop app itself falls back to whenever its much
- * larger canonical-title lookup table misses an entry).
+ * are ported for Bhagavad-gītā's 18 chapters inline below, and for Śrīmad-
+ * Bhāgavatam and Caitanya-caritāmṛta via [CanonicalChapterTitles]. A chapter
+ * missing from either lookup falls back to a bare "Canto C Chapter N" /
+ * "Chapter N" - exactly what the desktop app itself falls back to.
  */
 object ChapterTitleDeriver {
 
@@ -74,14 +74,16 @@ object ChapterTitleDeriver {
                 Regex("^(?:SB\\s+)?(\\d+)\\.(\\d+)", RegexOption.IGNORE_CASE).find(firstRef)?.let { m ->
                     val canto = m.groupValues[1].toInt()
                     val ch = m.groupValues[2].toInt()
-                    return "Canto $canto Chapter $ch"
+                    val title = CanonicalChapterTitles.getSbTitle(canto, ch)
+                    return if (title != null) "Canto $canto Chapter $ch: $title" else "Canto $canto Chapter $ch"
                 }
             }
             "DI", "MADHYA", "ANTYA" -> {
                 if (firstRef.contains("Concluding Words", ignoreCase = true)) return "Concluding Words"
                 Regex("^(?:Ādi|Adi|Madhya|Antya)\\s+(\\d+)", RegexOption.IGNORE_CASE).find(firstRef)?.let { m ->
                     val n = m.groupValues[1].toInt()
-                    return "Chapter $n"
+                    val title = CanonicalChapterTitles.getCcTitle(bookKey, n)
+                    return if (title != null) "Chapter $n: $title" else "Chapter $n"
                 }
             }
             "BS" -> {
